@@ -1,0 +1,46 @@
+using System.Text.Json;
+using System.Xml.Linq;
+
+namespace Jellyfin.Plugin.Hdrezka;
+
+public sealed record SeriesVoiceEpisodes(FreeVoice Voice, IReadOnlyList<Episode> Episodes);
+public sealed record LibraryEpisodeRecord(string Id, string Path, string Season, string Number, IReadOnlyList<FreeVoice> Voices);
+
+public static class SeriesLibraryWriter
+{
+    public static async Task WriteAsync(string root, CatalogEntry entry, CatalogDetail detail, IReadOnlyList<SeriesVoiceEpisodes> available, CancellationToken token)
+    {
+        var id = CatalogIdentity.FromPath(entry.Url.AbsolutePath) ?? throw new ArgumentException("Invalid video identity.", nameof(entry));
+        if (!detail.HasEpisodes) throw new ArgumentException("A movie cannot be written as a series.", nameof(detail));
+        var dir = Path.Combine(Path.GetFullPath(root), LibraryPath.TitleDirectory(id));
+        Directory.CreateDirectory(dir);
+        var nfo = new XDocument(new XElement("tvshow", new XElement("title", detail.Title), new XElement("plot", detail.Overview), MovieLibraryWriter.YearElement(entry.Description),
+            entry.Poster is null ? null : new XElement("thumb", entry.Poster.AbsoluteUri)));
+        await MovieLibraryWriter.AtomicWriteAsync(Path.Combine(dir, "tvshow.nfo"), nfo.ToString(), token).ConfigureAwait(false);
+        var episodes = available.SelectMany(v => v.Episodes.Select(e => (v.Voice, Episode: e)))
+            .GroupBy(x => (x.Episode.Season, x.Episode.Number));
+        foreach (var group in episodes)
+        {
+            token.ThrowIfCancellationRequested();
+            if (!int.TryParse(group.Key.Season, out var season) || season is < 0 or > 9999 ||
+                !int.TryParse(group.Key.Number, out var number) || number is < 1 or > 9999) continue;
+            var seasonDir = Path.Combine(dir, $"Season {season:D2}");
+            Directory.CreateDirectory(seasonDir);
+            var baseName = $"{LibraryPath.TitleDirectory(id)} S{season:D2}E{number:D2}";
+            var versions = group.Select(x => x.Voice).DistinctBy(v => v.Id).ToArray();
+            var record = new LibraryEpisodeRecord(id, entry.Url.AbsolutePath, group.Key.Season, group.Key.Number, versions);
+            await MovieLibraryWriter.AtomicWriteAsync(Path.Combine(seasonDir, baseName + ".hdrezka.json"), JsonSerializer.Serialize(record), token).ConfigureAwait(false);
+            var episodeNfo = new XDocument(new XElement("episodedetails", new XElement("title", group.First().Episode.Title), new XElement("season", season), new XElement("episode", number)));
+            await MovieLibraryWriter.AtomicWriteAsync(Path.Combine(seasonDir, baseName + ".nfo"), episodeNfo.ToString(), token).ConfigureAwait(false);
+            var primary = Path.Combine(seasonDir, baseName + ".strm");
+            if (!File.Exists(primary)) await MovieLibraryWriter.AtomicWriteAsync(primary, MovieLibraryWriter.Placeholder, token).ConfigureAwait(false);
+            foreach (var voice in versions.Skip(1))
+            {
+                var safeVersion = LibraryPath.VersionFileName(id, voice.Id);
+                var suffix = safeVersion[(LibraryPath.TitleDirectory(id).Length)..];
+                var path = Path.Combine(seasonDir, baseName + suffix);
+                if (!File.Exists(path)) await MovieLibraryWriter.AtomicWriteAsync(path, MovieLibraryWriter.Placeholder, token).ConfigureAwait(false);
+            }
+        }
+    }
+}

@@ -58,4 +58,3 @@ dotnet build src/Jellyfin.Plugin.Hdrezka/Jellyfin.Plugin.Hdrezka.csproj -c Relea
 ## Обратная связь
 
 Ошибки и предложения можно описывать в [Issues](https://github.com/DvjFrost/Jellyfin_HDrezka/issues). Не прикладывайте ключ TMDB, cookie, временные ссылки на видео или другие секреты.
-

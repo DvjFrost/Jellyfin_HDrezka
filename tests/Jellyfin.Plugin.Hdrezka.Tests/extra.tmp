@@ -1,0 +1,8 @@
+
+    [Fact]
+    public void MainCatalogDoesNotIncludeCarouselItems()
+    {
+        const string html = "<div class='b-newest_slider__list'><div class='b-content__inline_item'><div class='b-content__inline_item-link'><a href='/films/a/1-a.html'>Slider</a></div></div></div><div class='b-content__inline_items'><div class='b-content__inline_item'><div class='b-content__inline_item-link'><a href='/films/a/2-b.html'>Catalog</a></div></div></div>";
+        var entry = Assert.Single(CatalogParser.Parse(html, new Uri("https://example.test/")));
+        Assert.Equal("Catalog", entry.Title);
+    }

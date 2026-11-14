@@ -1,0 +1,48 @@
+using Jellyfin.Plugin.Hdrezka;
+using Xunit;
+
+public sealed class VoiceParserTests
+{
+    [Fact]
+    public void KeepsOnlyFreeVoicesInSiteOrder()
+    {
+        const string html = "<a class='b-translator__items b-prem_translator' data-id='88809' data-translator_id='111' title='Paid'></a><a class='b-translator__items' data-id='88809' data-translator_id='56' data-camrip='0' data-ads='1' data-director='0' title='Free'></a>";
+        var free = Assert.Single(VoiceParser.ParseFree(html));
+        Assert.Equal("56", free.Id);
+        Assert.Equal("88809", free.ContentId);
+        Assert.Equal("Free", free.Title);
+        Assert.Equal("1", free.IsAds);
+    }
+    [Fact]
+    public void DoesNotInventAnOptionWhenOnlyPremiumVoicesExist()
+    {
+        const string html = "<li class='b-translator__item b-prem_translator' data-id='88809' data-translator_id='111'>Paid</li>";
+        Assert.Empty(VoiceParser.ParseFree(html));
+    }
+    [Fact]
+    public void RejectsInvalidOrExplicitlyPaidValues()
+    {
+        const string html = "<a class='b-translator__items' data-translator_id='56' data-premium='1'>Paid</a><a class='b-translator__items' data-translator_id='abc'>Invalid</a>";
+        Assert.Empty(VoiceParser.ParseFree(html));
+    }
+
+    [Fact]
+    public void ReadsSingleFreeMovieVoiceFromPlayerInitialization()
+    {
+        const string html = "<script>sof.tv.initCDNMoviesEvents(87088, 59, 0, 0, 0, 'mirror.test', false, false, {\"id\":\"cdnplayer\",\"streams\":\"[360p]https://cdn.test/a\"});</script>";
+        var voice = Assert.Single(VoiceParser.ParseFree(html, "87088"));
+        Assert.Equal("59", voice.Id);
+        Assert.Equal("Многоголосый закадровый", voice.Title);
+        Assert.Equal("87088", voice.ContentId);
+        Assert.Empty(VoiceParser.ParseFree(html, "87105"));
+    }
+
+    [Fact]
+    public void NeverUsesPlayerFallbackForPremiumOnlyOrEmptyStreams()
+    {
+        const string call = "<script>sof.tv.initCDNMoviesEvents(123, 59, 0, 0, 0, 'mirror.test', false, false, {\"id\":\"cdnplayer\",\"streams\":\"[360p]https://cdn.test/a\"});</script>";
+        Assert.Empty(VoiceParser.ParseFree("<li class='b-prem_translator' data-translator_id='59'>Paid</li>" + call, "123"));
+        Assert.Empty(VoiceParser.ParseFree(call.Replace("[360p]https://cdn.test/a", ""), "123"));
+        Assert.Empty(VoiceParser.ParseFree(call.Replace("false, false", "true, false"), "123"));
+    }
+}

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head><title>HDrezka</title></head>
+<body>
+<div id="hdrezkaConfig" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select">
+    <div data-role="content"><div class="content-primary">
+        <h1>HDrezka</h1>
+        <form id="hdrezkaForm" method="post" action="">
+            <div class="inputContainer inputContainer-withDescription">
+                <label for="mirrorUrl">Адрес зеркала</label>
+                <input is="emby-input" id="mirrorUrl" name="mirrorUrl" type="url" list="hdrezkaMirrors" required autocapitalize="off" spellcheck="false" aria-describedby="mirrorHelp">
+                <datalist id="hdrezkaMirrors"><option value="https://rezka-tv.org/"></option><option value="https://hello-rezka.tv/"></option><option value="https://omnirezka.tv/"></option><option value="https://kinopub.me/"></option><option value="https://rezka.pub/"></option><option value="https://hdrezka.website/"></option><option value="https://hdrezka-home.tv/"></option><option value="https://hdrezka.name/"></option><option value="https://hdrezka.sh/"></option><option value="https://hdrezka.in/"></option><option value="https://hdrezka.club/"></option><option value="https://rezka-kz.tv/"></option><option value="https://rezka-ua.net/"></option><option value="https://rezka-ua.org/"></option><option value="https://rezka-ua.in/"></option><option value="https://rezka-ua.co/"></option><option value="https://hdrezka.kim/"></option><option value="https://rezka-ua.pub/"></option><option value="https://rezkery.com/"></option><option value="https://rezka-ua.tv/"></option><option value="https://hdrezka-fly.net/"></option><option value="https://hdrezka-sonic.net/"></option><option value="https://hdrezka.hk/"></option></datalist>
+                <div id="mirrorHelp" class="fieldDescription">Выберите зеркало из списка или введите собственный адрес HTTPS.</div>
+            </div>
+            <div class="selectContainer selectContainer-withDescription">
+                <label for="cdnHost">Сервер видео (CDN)</label>
+                <select is="emby-select" id="cdnHost" name="cdnHost" aria-describedby="cdnHelp">
+                    <option value="">Как на сайте</option>
+                    <option>prx.ukrtelcdn.net</option><option>prx-ams.ukrtelcdn.net</option><option>prx2-ams.ukrtelcdn.net</option>
+                    <option>stream.voidboost.top</option><option>stream.voidboost.link</option><option>stream.voidboost.club</option><option>stream.voidboost.cc</option>
+                </select>
+                <div id="cdnHelp" class="fieldDescription">Откройте карточку видео, затем в течение двух минут запустите проверку. Она передаст временную ссылку всем серверам из списка и измерит получение небольшого фрагмента. Результат зависит от видео и нагрузки.</div>
+                <button is="emby-button" type="button" class="raised button-submit block" id="testCdn"><span>Проверить CDN</span></button>
+                <div id="cdnStatus" role="status" aria-live="polite"></div>
+            </div>
+            <div class="inputContainer inputContainer-withDescription">
+                <label for="tmdbToken">Ключ доступа TMDB</label>
+                <input is="emby-input" id="tmdbToken" name="tmdbToken" type="password" autocomplete="new-password" autocapitalize="off" spellcheck="false" aria-describedby="tokenHelp">
+                <div id="tokenHelp" class="fieldDescription">Необязательно: API Read Access Token для постеров и названий TMDB. Без ключа каталог создаётся с названиями транслитом. Оставьте поле пустым, чтобы сохранить текущий ключ.</div>
+                <button is="emby-button" type="button" class="raised button-submit block" id="showToken" aria-pressed="false"><span>Показать введённый ключ</span></button>
+            </div>
+            <div class="selectContainer selectContainer-withDescription">
+                <label for="preferredQuality">Качество видео</label>
+                <select is="emby-select" id="preferredQuality" name="preferredQuality" aria-describedby="qualityHelp">
+                    <option value="0">Максимально доступное</option>
+                    <option value="1080">1080p</option>
+                    <option value="720">720p</option>
+                    <option value="480">480p</option>
+                    <option value="360">360p</option>
+                    <option value="240">240p</option>
+                </select>
+                <div id="qualityHelp" class="fieldDescription">Не выше обычного 1080p. Если выбранное качество недоступно, будет выбрано ближайшее доступное ниже.</div>
+            </div>
+            <div class="selectContainer selectContainer-withDescription">
+                <label for="syncDays">Синхронизация библиотеки, дней</label>
+                <select is="emby-select" id="syncDays" name="syncDays" required aria-describedby="syncHelp"></select>
+                <div id="syncHelp" class="fieldDescription">Как часто обновлять каталог: от 1 до 7 дней.</div>
+            </div>
+            <div class="inputContainer inputContainer-withDescription">
+                <h2>Состояние каталога</h2>
+                <div id="catalogStatistics" role="status" aria-live="polite">Загрузка статистики…</div>
+                <button is="emby-button" type="button" class="raised button-submit block" id="refreshCatalogStatistics"><span>Обновить статистику</span></button>
+            </div>
+            <div id="hdrezkaStatus" role="status" aria-live="polite"></div>
+            <button is="emby-button" type="submit" class="raised button-submit block"><span>Сохранить</span></button>
+        </form>
+    </div></div>
+    <script>
+    (function () {
+        const pluginId = 'e92a7808-6dc0-45a0-ae64-6d19caa8e93a';
+        const page = document.querySelector('#hdrezkaConfig');
+        const form = page.querySelector('#hdrezkaForm');
+        const mirror = page.querySelector('#mirrorUrl');
+        const syncDays = page.querySelector('#syncDays');
+        const cdn = page.querySelector('#cdnHost');
+        const cdnStatus = page.querySelector('#cdnStatus');
+        const testCdn = page.querySelector('#testCdn');
+        for (let day = 1; day <= 7; day++) syncDays.add(new Option(String(day), String(day)));
+        const token = page.querySelector('#tmdbToken');
+        const status = page.querySelector('#hdrezkaStatus');
+        const show = page.querySelector('#showToken');
+        const preferredQuality = page.querySelector('#preferredQuality');
+        const catalogStatistics = page.querySelector('#catalogStatistics');
+        async function loadCatalogStatistics() {
+            try {
+                const s = await ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Hdrezka/Catalog/Statistics'), dataType: 'json' });
+                const number = value => Number(value || 0).toLocaleString('ru-RU');
+                catalogStatistics.textContent = 'Всего: ' + number(s.Total) + '. Обработано TMDB: ' + number(s.Processed) + '. Найдено: ' + number(s.Matched) + '. Неоднозначно: ' + number(s.Uncertain) + '. Не найдено: ' + number(s.NoResults) + '. Осталось: ' + number(s.Remaining) + '.';
+            } catch (_) { catalogStatistics.textContent = 'Не удалось загрузить статистику каталога.'; }
+        }
+        page.querySelector('#refreshCatalogStatistics').addEventListener('click', loadCatalogStatistics);
+        page.addEventListener('pageshow', async function () {
+            loadCatalogStatistics();
+            Dashboard.showLoadingMsg();
+            try {
+                const [config, tasks] = await Promise.all([ApiClient.getPluginConfiguration(pluginId), ApiClient.getScheduledTasks()]);
+                const task = tasks.find(item => item.Key === 'HdrezkaSitemapTmdbIndex');
+                if (!task) throw new Error('Task missing');
+                const interval = task.Triggers.find(item => item.Type === 'IntervalTrigger');
+                const days = interval ? Math.round(interval.IntervalTicks / 864000000000) : 1;
+                syncDays.value = String(Math.max(1, Math.min(7, days)));
+                mirror.value = config.MirrorUrl || '';
+                cdn.value = config.CdnHost || '';
+                preferredQuality.value = String(config.PreferredQuality || 0);
+                token.value = '';
+                status.textContent = config.TmdbReadAccessToken ? 'Ключ TMDB сохранён.' : 'Ключ TMDB ещё не указан.';
+            } catch (_) { status.textContent = 'Не удалось загрузить настройки.'; }
+            finally { Dashboard.hideLoadingMsg(); }
+        });
+        testCdn.addEventListener('click', async function () {
+            testCdn.disabled = true;
+            cdnStatus.textContent = 'Проверяем серверы. Это может занять около минуты…';
+            try {
+                const results = await ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Hdrezka/Cdn/Test'), dataType: 'json' });
+                const ordered = results.filter(item => item.Available).sort((a, b) => a.Milliseconds - b.Milliseconds);
+                const lines = results.map(item => (item.Host || 'Как на сайте') + ': ' + (item.Available ? item.Milliseconds + ' мс' : item.Error));
+                if (ordered.length) lines.unshift('Быстрее остальных: ' + (ordered[0].Host || 'Как на сайте') + '. Выберите его в списке и сохраните настройки.');
+                cdnStatus.replaceChildren(...lines.map(line => { const row = document.createElement('div'); row.textContent = line; return row; }));
+            } catch (_) { cdnStatus.textContent = 'Не удалось выполнить тест. Откройте карточку видео и повторите проверку в течение двух минут.'; }
+            finally { testCdn.disabled = false; }
+        });
+        show.addEventListener('click', function () {
+            const visible = token.type === 'password';
+            token.type = visible ? 'text' : 'password';
+            show.setAttribute('aria-pressed', String(visible));
+            show.querySelector('span').textContent = visible ? 'Скрыть ключ' : 'Показать введённый ключ';
+        });
+        form.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            let url;
+            try { url = new URL(mirror.value); } catch (_) { mirror.setCustomValidity('Укажите полный адрес зеркала HTTPS.'); mirror.reportValidity(); return; }
+            if (url.protocol !== 'https:' || url.username || url.password) { mirror.setCustomValidity('Используйте HTTPS без имени пользователя и пароля.'); mirror.reportValidity(); return; }
+            const days = Number(syncDays.value);
+            if (!Number.isInteger(days) || days < 1 || days > 7) { status.textContent = 'Выберите интервал от 1 до 7 дней.'; return; }
+            const submit = form.querySelector('[type="submit"]');
+            submit.disabled = true;
+            Dashboard.showLoadingMsg();
+            try {
+                const config = await ApiClient.getPluginConfiguration(pluginId);
+                const tasks = await ApiClient.getScheduledTasks();
+                const task = tasks.find(item => item.Key === 'HdrezkaSitemapTmdbIndex');
+                const tmdbTask = tasks.find(item => item.Key === 'HdrezkaTmdbEnrichment');
+                if (!task) throw new Error('Task missing');
+                config.MirrorUrl = mirror.value.trim();
+                config.CdnHost = cdn.value;
+                config.PreferredQuality = Number(preferredQuality.value);
+                const newToken = token.value.trim();
+                if (newToken) config.TmdbReadAccessToken = newToken;
+                await ApiClient.updatePluginConfiguration(pluginId, config);
+                token.value = '';
+                const triggers = task.Triggers.filter(item => item.Type !== 'IntervalTrigger');
+                triggers.push({ Type: 'IntervalTrigger', IntervalTicks: days * 864000000000 });
+                try { await ApiClient.updateScheduledTaskTriggers(task.Id, triggers); }
+                catch (_) { status.textContent = 'Зеркало и ключ сохранены, но не удалось обновить расписание.'; return; }
+                if (newToken && task.State === 'Idle' && tmdbTask && tmdbTask.State === 'Idle') {
+                    try {
+                        await ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('ScheduledTasks/Running/' + tmdbTask.Id) });
+                        status.textContent = 'Настройки сохранены. Обновление данных TMDB запущено.';
+                    } catch (_) { status.textContent = 'Настройки сохранены. Запустите «Обновить данные HDrezka из TMDB» в запланированных задачах.'; }
+                } else status.textContent = newToken ? 'Настройки сохранены. TMDB начнёт обновление после создания каталога.' : 'Настройки сохранены.';
+            } catch (_) { status.textContent = 'Не удалось сохранить настройки.'; }
+            finally { submit.disabled = false; Dashboard.hideLoadingMsg(); }
+        });
+        mirror.addEventListener('input', function () { mirror.setCustomValidity(''); });
+    })();
+    </script>
+</div>
+</body>
+</html>
+

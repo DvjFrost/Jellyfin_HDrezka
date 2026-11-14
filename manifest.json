@@ -1,0 +1,21 @@
+[
+  {
+    "owner": "Frost & Codex",
+    "category": "General",
+    "description": "Каталог фильмов и сериалов HDrezka с данными TMDB и бесплатными озвучками.",
+    "versions": [
+      {
+        "timestamp": "2026-11-14T00:00:00Z",
+        "targetAbi": "12.4.0.0",
+        "changelog": "Первая тестовая версия",
+        "checksum": "223d59e72b40406464b2b4b339d57cff",
+        "sourceUrl": "https://github.com/DvjFrost/Jellyfin_HDrezka/releases/download/v0.1.0/HDrezka-v0.1.0.zip",
+        "version": "0.1.0.0"
+      }
+    ],
+    "guid": "e92a7808-6dc0-45a0-ae64-6d19caa8e93a",
+    "name": "HDrezka",
+    "imageUrl": "https://raw.githubusercontent.com/DvjFrost/Jellyfin_HDrezka/main/src/Jellyfin.Plugin.Hdrezka/Assets/icon.png",
+    "overview": "Каталог и воспроизведение HDrezka"
+  }
+]
