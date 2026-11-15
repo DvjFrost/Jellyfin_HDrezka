@@ -42,9 +42,25 @@ public static class VoiceParser
             var match = Regex.Match(script.InnerText, pattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
             if (!match.Success || match.Groups["content"].Value != expectedContentId) continue;
             var voice = match.Groups["voice"].Value;
-            var title = voice switch { "56" => "Дубляж", "59" => "Многоголосый закадровый", "62" => "Одноголосый закадровый", "238" => "Оригинал (+субтитры)", _ => "Доступная озвучка" };
+            var title = SingleTranslationTitle(document) ?? (voice switch { "56" => "Дубляж", "59" => "Многоголосый закадровый", "62" => "Одноголосый закадровый", "238" => "Оригинал (+субтитры)", _ => "Доступная озвучка" });
             return [new FreeVoice(voice, expectedContentId, title, match.Groups["cam"].Value, match.Groups["ads"].Value, match.Groups["director"].Value)];
         }
         return [];
+    }
+
+    private static string? SingleTranslationTitle(HtmlDocument document)
+    {
+        var rows = document.DocumentNode.SelectNodes("//table[contains(concat(' ', normalize-space(@class), ' '), ' b-post__info ')]//tr") ?? Enumerable.Empty<HtmlNode>();
+        foreach (var row in rows)
+        {
+            var heading = row.SelectSingleNode(".//h2");
+            if (heading is null || !HtmlEntity.DeEntitize(heading.InnerText).Trim().Equals("В переводе", StringComparison.OrdinalIgnoreCase)) continue;
+            var cells = row.SelectNodes("./td");
+            if (cells is null || cells.Count != 2) return null;
+            var title = Regex.Replace(HtmlEntity.DeEntitize(cells[1].InnerText), @"\s+", " ").Trim();
+            if (title.Length is 0 or > 160 || title.Contains(',') || title.Contains(';') || Regex.IsMatch(title, @"\s+и\s+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1))) return null;
+            return title;
+        }
+        return null;
     }
 }

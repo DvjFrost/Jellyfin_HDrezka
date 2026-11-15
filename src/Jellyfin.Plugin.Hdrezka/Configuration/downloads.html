@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head><title>Загрузки HDrezka</title></head>
+<body>
+<div id="hdrezkaDownloads" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select">
+    <style>#hdrezkaDownloads #downloadMulti label { display: flex; align-items: center; gap: .75rem; min-height: 3rem; margin: 0; } #hdrezkaDownloads #downloadMulti input { width: 1.25rem; height: 1.25rem; flex: none; }</style>
+    <div data-role="content"><div class="content-primary">
+        <section aria-labelledby="downloadsTitle">
+            <h2 id="downloadsTitle">Загрузки в медиатеку</h2>
+            <form id="downloadSearch" method="get" action="" aria-label="Поиск видео HDrezka">
+                <div class="inputContainer"><label for="downloadQuery">Название фильма или сериала</label><input is="emby-input" id="downloadQuery" name="query" type="search" required></div>
+                <button is="emby-button" type="submit" class="raised button-submit block"><span>Найти</span></button>
+            </form>
+            <form id="downloadForm" method="post" action="" aria-label="Выбор видео для загрузки">
+                <div class="selectContainer"><label for="downloadItem">Видео</label><select is="emby-select" id="downloadItem" name="item" required><option value="">Сначала найдите видео</option></select></div>
+                <div class="selectContainer" id="downloadEpisodeGroup" hidden><label for="downloadEpisode">Серия</label><select is="emby-select" id="downloadEpisode" name="episode"></select></div>
+                <div class="selectContainer" id="downloadScopeGroup" hidden><label for="downloadScope">Что загрузить</label><select is="emby-select" id="downloadScope" name="scope"><option value="one">Выбранную серию</option><option value="multiple">Несколько серий</option><option value="season">Весь выбранный сезон</option><option value="all">Все доступные серии</option></select></div>
+                <div id="downloadMultiGroup" hidden><fieldset><legend>Отметьте нужные серии</legend><div id="downloadMulti" style="max-height: 20rem; overflow-y: auto;"></div></fieldset></div>
+                <div class="selectContainer"><label for="downloadVoice">Бесплатная озвучка</label><select is="emby-select" id="downloadVoice" name="voice" required></select></div>
+                <div class="selectContainer"><label for="downloadDestination">Локальная медиатека и папка</label><select is="emby-select" id="downloadDestination" name="destination" required></select></div>
+                <div class="selectContainer"><label for="downloadQuality">Максимальное качество</label><select is="emby-select" id="downloadQuality" name="quality"><option value="0">Максимально доступное до 1080p</option><option value="1080">1080p</option><option value="720">720p</option><option value="480">480p</option><option value="360">360p</option><option value="240">240p</option></select></div>
+                <button is="emby-button" type="submit" class="raised button-submit block"><span>Добавить в очередь</span></button>
+            </form>
+            <p id="downloadStatus" role="status" aria-live="polite"></p>
+            <details><summary>Создать локальную медиатеку</summary>
+                <form id="createDownloadLibrary" method="post" action="" aria-label="Создание медиатеки">
+                    <div class="inputContainer"><label for="newLibraryName">Название медиатеки</label><input is="emby-input" id="newLibraryName" name="name" required maxlength="120"></div>
+                    <div class="inputContainer"><label for="newLibraryPath">Существующая папка на сервере</label><input is="emby-input" id="newLibraryPath" name="path" required></div>
+                    <div class="selectContainer"><label for="newLibraryType">Тип медиатеки</label><select is="emby-select" id="newLibraryType" name="type"><option value="movies">Фильмы</option><option value="series">Сериалы</option></select></div>
+                    <button is="emby-button" type="submit" class="raised button-submit block"><span>Создать медиатеку</span></button>
+                </form>
+            </details>
+            <h3>Очередь загрузок</h3><button is="emby-button" type="button" class="raised button-submit block" id="downloadRefresh"><span>Обновить очередь</span></button>
+            <button is="emby-button" type="button" class="raised button-submit block" id="clearDownloadHistory"><span>Очистить завершённые записи</span></button>
+            <p class="fieldDescription">Удаляются только записи из очереди. Скачанные файлы остаются в медиатеке.</p>
+            <div id="downloadJobs" aria-live="polite"></div>
+        </section>
+    </div></div>
+    <script>
+    (function () {
+        const page = document.querySelector('#hdrezkaDownloads');
+        const downloadSearch = page.querySelector('#downloadSearch');
+        const downloadForm = page.querySelector('#downloadForm');
+        const downloadItem = page.querySelector('#downloadItem');
+        const downloadEpisode = page.querySelector('#downloadEpisode');
+        const episodeGroup = page.querySelector('#downloadEpisodeGroup');
+        const scopeGroup = page.querySelector('#downloadScopeGroup');
+        const multiGroup = page.querySelector('#downloadMultiGroup');
+        const downloadMulti = page.querySelector('#downloadMulti');
+        const downloadVoice = page.querySelector('#downloadVoice');
+        const downloadDestination = page.querySelector('#downloadDestination');
+        const downloadStatus = page.querySelector('#downloadStatus');
+        let selectedDownloadItem = null;
+        let downloadEpisodes = [];
+        let destinations = [];
+        const get = path => ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl(path), dataType: 'json' });
+        const post = (path, body) => ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl(path), data: JSON.stringify(body), contentType: 'application/json' });
+        const remove = path => ApiClient.ajax({ type: 'DELETE', url: ApiClient.getUrl(path) });
+        function clearSelect(select, label) { select.replaceChildren(new Option(label, '')); }
+        function fillDestinations(series) {
+            clearSelect(downloadDestination, 'Выберите медиатеку');
+            for (const destination of destinations.filter(item => item.Series === series))
+                downloadDestination.add(new Option(destination.Name + ' — ' + destination.Path, destination.Id));
+        }
+        async function loadDownloadItem(id) {
+            selectedDownloadItem = null;
+            clearSelect(downloadVoice, 'Выберите озвучку');
+            if (!id) return;
+            try {
+                const item = await get('Hdrezka/Downloads/Items/' + encodeURIComponent(id));
+                selectedDownloadItem = item;
+                for (const voice of item.Voices) downloadVoice.add(new Option(voice.Title, voice.Id));
+                if (item.Voices.length === 1) downloadVoice.value = item.Voices[0].Id;
+                fillDestinations(item.Series);
+                downloadStatus.textContent = item.Voices.length ? 'Выберите озвучку, качество и медиатеку.' : 'Откройте карточку видео в Jellyfin и дождитесь загрузки бесплатных озвучек.';
+            } catch (_) { downloadStatus.textContent = 'Не удалось получить озвучки. Сначала откройте карточку видео в Jellyfin.'; }
+        }
+        async function refreshDownloads() {
+            try {
+                const result = await get('Hdrezka/Downloads/Queue');
+                const statusNames = { Queued: 'Ожидает', Downloading: 'Загружается', Completed: 'Загружено', Failed: 'Ошибка', Cancelled: 'Отменено', 0: 'Ожидает', 1: 'Загружается', 2: 'Загружено', 3: 'Ошибка', 4: 'Отменено' };
+                const rows = result.Jobs.map(job => {
+                    const row = document.createElement('p');
+                    row.textContent = job.RelativePath + ' — ' + (statusNames[job.Status] || String(job.Status)) + (job.ActualQuality ? ' (вариант сайта: ' + job.ActualQuality + 'p)' : '') + (job.Error ? ': ' + job.Error : '');
+                    if (job.Width && job.Height) row.append(' — ' + job.Width + '×' + job.Height);
+                    const progress = (result.Progress || {})[job.Id];
+                    if (progress && progress.TotalBytes > 0) {
+                        const bar = document.createElement('progress');
+                        bar.max = progress.TotalBytes; bar.value = progress.Bytes;
+                        bar.setAttribute('aria-label', 'Прогресс: ' + job.RelativePath);
+                        row.append(' ', bar, ' ' + Math.floor(progress.Bytes * 100 / progress.TotalBytes) + '%');
+                    }
+                    if (['Queued', 'Downloading', 0, 1].includes(job.Status)) {
+                        const button = document.createElement('button');
+                        button.type = 'button'; button.textContent = 'Отменить'; button.className = 'raised button-submit';
+                        button.addEventListener('click', async () => {
+                            button.disabled = true;
+                            try { await post('Hdrezka/Downloads/Queue/' + encodeURIComponent(job.Id) + '/Cancel', {}); await refreshDownloads(); }
+                            catch (_) { downloadStatus.textContent = 'Не удалось отменить загрузку.'; button.disabled = false; }
+                        });
+                        row.append(' ', button);
+                    }
+                    if (['Completed', 'Failed', 'Cancelled', 2, 3, 4].includes(job.Status)) {
+                        const button = document.createElement('button');
+                        button.type = 'button'; button.textContent = 'Убрать из очереди'; button.className = 'raised button-submit';
+                        button.addEventListener('click', async () => {
+                            button.disabled = true;
+                            try { await remove('Hdrezka/Downloads/Queue/' + encodeURIComponent(job.Id)); await refreshDownloads(); }
+                            catch (_) { downloadStatus.textContent = 'Не удалось удалить запись. Если загрузка только что отменена, дождитесь её остановки.'; button.disabled = false; }
+                        });
+                        row.append(' ', button);
+                    }
+                    return row;
+                });
+                if (result.StoppedByMirror) { const warning = document.createElement('p'); warning.textContent = 'Зеркало вернуло HTTP 500. Запросы остановлены.'; rows.unshift(warning); }
+                page.querySelector('#downloadJobs').replaceChildren(...rows);
+            } catch (_) { downloadStatus.textContent = 'Не удалось загрузить состояние очереди.'; }
+        }
+        downloadSearch.addEventListener('submit', async event => {
+            event.preventDefault();
+            downloadStatus.textContent = 'Ищем в локальном каталоге…';
+            clearSelect(downloadItem, 'Выберите видео');
+            clearSelect(downloadVoice, 'Выберите озвучку');
+            episodeGroup.hidden = true;
+            scopeGroup.hidden = true;
+            multiGroup.hidden = true;
+            selectedDownloadItem = null;
+            try {
+                const catalogs = await get('Hdrezka/Downloads/CatalogLibraries');
+                const userId = ApiClient.getCurrentUserId();
+                const query = page.querySelector('#downloadQuery').value.trim();
+                let total = 0;
+                for (const catalog of catalogs) {
+                    const params = { ParentId: catalog.ItemId, SearchTerm: query, IncludeItemTypes: 'Movie,Series', Recursive: true, Limit: 30 };
+                    const result = await ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Users/' + userId + '/Items', params), dataType: 'json' });
+                    for (const item of result.Items || []) { const option = new Option(item.Name + (item.ProductionYear ? ' (' + item.ProductionYear + ')' : ''), item.Id); option.dataset.type = item.Type; downloadItem.add(option); total++; }
+                }
+                destinations = await get('Hdrezka/Downloads/Destinations');
+                downloadStatus.textContent = total ? 'Выберите видео из результатов.' : 'В локальном каталоге ничего не найдено.';
+            } catch (_) { downloadStatus.textContent = 'Не удалось выполнить поиск.'; }
+        });
+        downloadItem.addEventListener('change', async () => {
+            episodeGroup.hidden = true;
+            scopeGroup.hidden = true;
+            multiGroup.hidden = true;
+            page.querySelector('#downloadScope').value = 'one';
+            clearSelect(downloadEpisode, 'Выберите серию');
+            const selected = downloadItem.selectedOptions[0];
+            if (!downloadItem.value) return;
+            if (selected.dataset.type !== 'Series') { await loadDownloadItem(downloadItem.value); return; }
+            selectedDownloadItem = null;
+            clearSelect(downloadVoice, 'Выберите озвучку');
+            episodeGroup.hidden = false;
+            scopeGroup.hidden = false;
+            try {
+                const result = await ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Shows/' + downloadItem.value + '/Episodes', { UserId: ApiClient.getCurrentUserId() }), dataType: 'json' });
+                downloadEpisodes = result.Items || [];
+                const choices = document.createDocumentFragment();
+                for (const episode of downloadEpisodes) {
+                    const label = 'S' + String(episode.ParentIndexNumber || 0).padStart(2, '0') + 'E' + String(episode.IndexNumber || 0).padStart(2, '0') + ' ' + episode.Name;
+                    downloadEpisode.add(new Option(label, episode.Id));
+                    const row = document.createElement('label');
+                    row.className = 'checkboxContainer';
+                    const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.value = episode.Id;
+                    const text = document.createElement('span'); text.textContent = label;
+                    row.append(checkbox, text); choices.append(row);
+                }
+                downloadMulti.replaceChildren(choices);
+                downloadStatus.textContent = downloadEpisode.length > 1 ? 'Выберите серию.' : 'Откройте карточку сериала в Jellyfin, чтобы загрузить список серий.';
+            } catch (_) { downloadStatus.textContent = 'Не удалось получить список серий.'; }
+        });
+        downloadEpisode.addEventListener('change', () => loadDownloadItem(downloadEpisode.value));
+        page.querySelector('#downloadScope').addEventListener('change', event => { multiGroup.hidden = event.target.value !== 'multiple'; });
+        downloadMulti.addEventListener('change', () => {
+            const first = downloadMulti.querySelector('input:checked');
+            if (first && first.value !== downloadEpisode.value) {
+                downloadEpisode.value = first.value;
+                loadDownloadItem(first.value);
+            }
+        });
+        downloadForm.addEventListener('submit', async event => {
+            event.preventDefault();
+            if (!selectedDownloadItem) { downloadStatus.textContent = 'Выберите фильм или серию.'; return; }
+            const button = downloadForm.querySelector('[type="submit"]'); button.disabled = true;
+            try {
+                const scope = page.querySelector('#downloadScope').value;
+                const common = { VoiceId: downloadVoice.value, DestinationId: downloadDestination.value, Quality: Number(page.querySelector('#downloadQuality').value) };
+                if (selectedDownloadItem.Series && scope !== 'one') {
+                    const selected = downloadEpisodes.find(item => item.Id === downloadEpisode.value);
+                    const ids = scope === 'multiple' ? Array.from(downloadMulti.querySelectorAll('input:checked'), option => option.value)
+                        : downloadEpisodes.filter(item => scope === 'all' || item.ParentIndexNumber === selected.ParentIndexNumber).map(item => item.Id);
+                    if (!ids.length) { downloadStatus.textContent = 'Отметьте хотя бы одну серию.'; return; }
+                    const result = await ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Hdrezka/Downloads/Queue/Batch'), data: JSON.stringify({ ...common, ItemIds: ids }), contentType: 'application/json', dataType: 'json' });
+                    downloadStatus.textContent = 'Добавлено серий: ' + result.Added + '. Пропущено (нет озвучки или файл существует): ' + result.Skipped + '.';
+                } else {
+                    await post('Hdrezka/Downloads/Queue', { ...common, ItemId: selectedDownloadItem.ItemId });
+                    downloadStatus.textContent = 'Видео добавлено в очередь.';
+                }
+                await refreshDownloads();
+            } catch (_) { downloadStatus.textContent = 'Не удалось добавить загрузку. Проверьте озвучку, медиатеку и наличие файла.'; }
+            finally { button.disabled = false; }
+        });
+        page.querySelector('#createDownloadLibrary').addEventListener('submit', async event => {
+            event.preventDefault();
+            const button = event.currentTarget.querySelector('[type="submit"]'); button.disabled = true;
+            try {
+                await post('Hdrezka/Downloads/Destinations', { Name: page.querySelector('#newLibraryName').value.trim(), Path: page.querySelector('#newLibraryPath').value.trim(), Series: page.querySelector('#newLibraryType').value === 'series' });
+                destinations = await get('Hdrezka/Downloads/Destinations');
+                if (selectedDownloadItem) fillDestinations(selectedDownloadItem.Series);
+                downloadStatus.textContent = 'Медиатека создана.';
+            } catch (_) { downloadStatus.textContent = 'Не удалось создать медиатеку. Проверьте название и существующую папку на сервере.'; }
+            finally { button.disabled = false; }
+        });
+        page.querySelector('#downloadRefresh').addEventListener('click', refreshDownloads);
+        page.querySelector('#clearDownloadHistory').addEventListener('click', async function () {
+            this.disabled = true;
+            try { await remove('Hdrezka/Downloads/Queue/Finished'); await refreshDownloads(); downloadStatus.textContent = 'История очищена. Скачанные файлы сохранены.'; }
+            catch (_) { downloadStatus.textContent = 'Не удалось очистить историю.'; }
+            finally { this.disabled = false; }
+        });
+        let timer;
+        page.addEventListener('viewshow', () => { refreshDownloads(); timer = setInterval(refreshDownloads, 5000); });
+        page.addEventListener('viewhide', () => { clearInterval(timer); timer = null; });
+    })();
+    </script>
+</div>
+</body>
+</html>

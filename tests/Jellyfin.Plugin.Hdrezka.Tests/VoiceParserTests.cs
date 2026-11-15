@@ -38,6 +38,20 @@ public sealed class VoiceParserTests
     }
 
     [Fact]
+    public void ReadsSingleVoiceNameFromMovieInfo()
+    {
+        const string html = "<table class='b-post__info'><tr><td><h2>В переводе</h2>:</td><td>Музовоз</td></tr></table><script>sof.tv.initCDNMoviesEvents(92655, 354, 0, 0, 0, 'mirror.test', false, false, {\"id\":\"cdnplayer\",\"streams\":\"[360p]https://cdn.test/a\"});</script>";
+        Assert.Equal("Музовоз", Assert.Single(VoiceParser.ParseFree(html, "92655")).Title);
+    }
+
+    [Fact]
+    public void DoesNotAssignAmbiguousMultipleTranslationsToOneVoice()
+    {
+        const string html = "<table class='b-post__info'><tr><td><h2>В переводе</h2>:</td><td>Музовоз, Дубляж</td></tr></table><script>sof.tv.initCDNMoviesEvents(92655, 354, 0, 0, 0, 'mirror.test', false, false, {\"id\":\"cdnplayer\",\"streams\":\"[360p]https://cdn.test/a\"});</script>";
+        Assert.Equal("Доступная озвучка", Assert.Single(VoiceParser.ParseFree(html, "92655")).Title);
+    }
+
+    [Fact]
     public void NeverUsesPlayerFallbackForPremiumOnlyOrEmptyStreams()
     {
         const string call = "<script>sof.tv.initCDNMoviesEvents(123, 59, 0, 0, 0, 'mirror.test', false, false, {\"id\":\"cdnplayer\",\"streams\":\"[360p]https://cdn.test/a\"});</script>";

@@ -6,7 +6,7 @@ namespace Jellyfin.Plugin.Hdrezka;
 
 public sealed record NamedStream(string Voice, VideoStream Stream);
 public sealed record VoiceListing(string Title, IReadOnlyList<FreeVoice> Voices);
-public sealed record VideoDetailListing(CatalogDetail Detail, IReadOnlyList<FreeVoice> Voices, string? ActiveVoiceId = null, IReadOnlyList<Episode>? EmbeddedEpisodes = null);
+public sealed record VideoDetailListing(CatalogDetail Detail, IReadOnlyList<FreeVoice> Voices, string? ActiveVoiceId = null, IReadOnlyList<Episode>? EmbeddedEpisodes = null, IReadOnlyDictionary<(int Season, int Episode), string>? EpisodeNames = null);
 
 public sealed class HdrezkaSource(MirrorClient mirror)
 {
@@ -24,7 +24,8 @@ public sealed class HdrezkaSource(MirrorClient mirror)
         var active = doc.DocumentNode.SelectSingleNode("//*[contains(concat(' ',normalize-space(@class),' '),' b-translator__item ') and contains(concat(' ',normalize-space(@class),' '),' active ')]");
         var activeId = active?.GetAttributeValue("data-translator_id", active.GetAttributeValue("data-translator-id", ""));
         var episodes = detail.HasEpisodes ? EpisodeParser.Parse(html) : [];
-        return new VideoDetailListing(detail, voices, activeId, episodes);
+        var episodeNames = detail.HasEpisodes ? EpisodeScheduleParser.Parse(html) : null;
+        return new VideoDetailListing(detail, voices, activeId, episodes, episodeNames);
     }
 
     public async Task<CatalogDetail> DetailAsync(string path, CancellationToken token)
@@ -84,12 +85,18 @@ public sealed class HdrezkaSource(MirrorClient mirror)
         return await MovieVoiceStreamsFromListingAsync(path, voice, token).ConfigureAwait(false);
     }
     public async Task<IReadOnlyList<NamedStream>> MovieVoiceStreamsFromListingAsync(string path, FreeVoice voice, CancellationToken token)
+        => await MovieVoiceStreamsCoreAsync(path, voice, false, token).ConfigureAwait(false);
+
+    public async Task<IReadOnlyList<NamedStream>> MovieVoiceAlternativesFromListingAsync(string path, FreeVoice voice, CancellationToken token)
+        => await MovieVoiceStreamsCoreAsync(path, voice, true, token).ConfigureAwait(false);
+
+    private async Task<IReadOnlyList<NamedStream>> MovieVoiceStreamsCoreAsync(string path, FreeVoice voice, bool alternatives, CancellationToken token)
     {
         var id = ContentId(path);
         if (!Digits(voice.Id) || (voice.ContentId.Length > 0 && voice.ContentId != id)) return [];
         var form = new Dictionary<string,string> { ["id"] = id, ["translator_id"] = voice.Id, ["is_camrip"] = voice.IsCamrip, ["is_ads"] = voice.IsAds, ["is_director"] = voice.IsDirector, ["action"] = "get_movie" };
         var json = await mirror.PostFormAsync("ajax/get_cdn_series/", form, token).ConfigureAwait(false);
-        return ParseStreams(json).Select(stream => new NamedStream(voice.Title, stream)).ToArray();
+        return ParseStreams(json, alternatives).Select(stream => new NamedStream(voice.Title, stream)).ToArray();
     }
     public async Task<IReadOnlyList<Episode>> EpisodesAsync(string path, string voiceId, CancellationToken token)
     {
@@ -99,12 +106,13 @@ public sealed class HdrezkaSource(MirrorClient mirror)
         return await FetchEpisodesAsync(id, voiceId, token).ConfigureAwait(false);
     }
 
-    public Task<IReadOnlyList<Episode>> EpisodesFromListingAsync(string path, VideoDetailListing listing, FreeVoice voice, CancellationToken token)
+    public async Task<IReadOnlyList<Episode>> EpisodesFromListingAsync(string path, VideoDetailListing listing, FreeVoice voice, CancellationToken token)
     {
         var id = ContentId(path);
-        if (!listing.Voices.Contains(voice) || (voice.ContentId.Length > 0 && voice.ContentId != id)) return Task.FromResult<IReadOnlyList<Episode>>([]);
-        if (listing.EmbeddedEpisodes is { Count: > 0 } && string.Equals(listing.ActiveVoiceId, voice.Id, StringComparison.Ordinal)) return Task.FromResult(listing.EmbeddedEpisodes);
-        return FetchEpisodesAsync(id, voice.Id, token);
+        if (!listing.Voices.Contains(voice) || (voice.ContentId.Length > 0 && voice.ContentId != id)) return [];
+        var episodes = listing.EmbeddedEpisodes is { Count: > 0 } && string.Equals(listing.ActiveVoiceId, voice.Id, StringComparison.Ordinal)
+            ? listing.EmbeddedEpisodes : await FetchEpisodesAsync(id, voice.Id, token).ConfigureAwait(false);
+        return EpisodeScheduleParser.Apply(episodes, listing.EpisodeNames);
     }
 
     private async Task<IReadOnlyList<Episode>> FetchEpisodesAsync(string id, string voiceId, CancellationToken token)
@@ -123,19 +131,25 @@ public sealed class HdrezkaSource(MirrorClient mirror)
         return await EpisodeStreamsFromListingAsync(path, voice, season, episode, token).ConfigureAwait(false);
     }
     public async Task<IReadOnlyList<NamedStream>> EpisodeStreamsFromListingAsync(string path, FreeVoice voice, string season, string episode, CancellationToken token)
+        => await EpisodeStreamsCoreAsync(path, voice, season, episode, false, token).ConfigureAwait(false);
+
+    public async Task<IReadOnlyList<NamedStream>> EpisodeAlternativesFromListingAsync(string path, FreeVoice voice, string season, string episode, CancellationToken token)
+        => await EpisodeStreamsCoreAsync(path, voice, season, episode, true, token).ConfigureAwait(false);
+
+    private async Task<IReadOnlyList<NamedStream>> EpisodeStreamsCoreAsync(string path, FreeVoice voice, string season, string episode, bool alternatives, CancellationToken token)
     {
         var id = ContentId(path);
         if (!Digits(season) || !Digits(episode) || !Digits(voice.Id) || (voice.ContentId.Length > 0 && voice.ContentId != id)) return [];
         var form = new Dictionary<string,string> { ["id"] = id, ["translator_id"] = voice.Id, ["season"] = season, ["episode"] = episode, ["action"] = "get_stream" };
         var json = await mirror.PostFormAsync("ajax/get_cdn_series/", form, token).ConfigureAwait(false);
-        return ParseStreams(json).Select(stream => new NamedStream(voice.Title, stream)).ToArray();
+        return ParseStreams(json, alternatives).Select(stream => new NamedStream(voice.Title, stream)).ToArray();
     }
 
-    private static IReadOnlyList<VideoStream> ParseStreams(string json)
+    private static IReadOnlyList<VideoStream> ParseStreams(string json, bool alternatives = false)
     {
         using var doc = JsonDocument.Parse(json);
         if (!Success(doc.RootElement) || IsPremium(doc.RootElement) || !doc.RootElement.TryGetProperty("url", out var url) || url.ValueKind != JsonValueKind.String) return Array.Empty<VideoStream>();
-        return StreamParser.Parse(url.GetString() ?? "");
+        return alternatives ? StreamParser.ParseAlternatives(url.GetString() ?? "") : StreamParser.Parse(url.GetString() ?? "");
     }
     private static bool Success(JsonElement root) => root.TryGetProperty("success", out var s) && s.ValueKind == JsonValueKind.True;
     private static bool IsPremium(JsonElement root)

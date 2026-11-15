@@ -5,6 +5,15 @@ using Xunit;
 public sealed class StreamParserTests
 {
     [Fact]
+    public void AlternativesPreserveEverySafeUrlAndExcludeUltra()
+    {
+        const string input = "[720p]https://cdn.example/a.mp4 or https://cdn.example/b.m3u8,[1080p Ultra]https://cdn.example/ultra.mp4,[1080p]file:///unsafe or https://cdn.example/c.mp4";
+        var streams = StreamParser.ParseAlternatives(input);
+        Assert.Equal(new[] { 720, 720, 1080 }, streams.Select(x => x.Quality));
+        Assert.Equal(new[] { "/a.mp4", "/b.m3u8", "/c.mp4" }, streams.Select(x => x.Url.AbsolutePath));
+        Assert.Equal("/b.m3u8", StreamParser.Parse(input)[0].Url.AbsolutePath);
+    }
+    [Fact]
     public void ParsesPlainAndEncodedStreamsWithQualityAndAlternativeUrls()
     {
         const string plain = "[360p]https://cdn.example/360.m3u8,[720p]https://cdn.example/720.m3u8 or https://alt.example/720.m3u8,[1080p]https://cdn.example/1080.m3u8";

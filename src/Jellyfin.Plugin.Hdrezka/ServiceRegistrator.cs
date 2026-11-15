@@ -15,6 +15,8 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
     public void RegisterServices(IServiceCollection services, IServerApplicationHost applicationHost)
     {
         services.AddSingleton<LibraryMediaProvider>();
+        services.AddSingleton<DownloadService>();
+        services.AddHostedService(sp => sp.GetRequiredService<DownloadService>());
         services.AddSingleton<SeriesMigration>();
         services.AddSingleton<SitemapDetailCoordinator>();
         services.AddScoped<SitemapDetailFilter>();

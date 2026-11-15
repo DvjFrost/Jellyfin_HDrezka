@@ -3,6 +3,15 @@ using Xunit;
 
 public class CdnSelectionTests
 {
+    [Fact]
+    public void DownloadHostMustBeOneOfKnownCdnHosts()
+    {
+        Assert.True(CdnSelection.IsKnownDownloadHost(new Uri("https://stream.voidboost.one/video")));
+        Assert.True(CdnSelection.IsKnownDownloadHost(new Uri("https://prx.ukrtelcdn.net/video")));
+        Assert.False(CdnSelection.IsKnownDownloadHost(new Uri("http://127.0.0.1/admin")));
+        Assert.False(CdnSelection.IsKnownDownloadHost(new Uri("https://stream.voidboost.one.evil.example/")));
+        Assert.False(CdnSelection.IsKnownDownloadHost(new Uri("https://stream.voidboost.one:444/")));
+    }
     [Fact] public void ReplacesOnlyHostAndKeepsSignedPathAndQuery()
     {
         var input = new Uri("https://stream.voidboost.one/path/video.mp4?token=abc&x=1");

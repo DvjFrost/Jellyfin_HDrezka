@@ -6,19 +6,39 @@ using Xunit;
 public sealed class MirrorClientTests
 {
     [Fact]
+    public async Task Http500StopsFurtherRequestsAcrossClientsForSameMirror()
+    {
+        var calls = 0;
+        using var client = new HttpClient(new Counting500Handler(() => Interlocked.Increment(ref calls)));
+        var uri = new Uri("https://stop-after-500.example/");
+        using var first = new MirrorClient(uri, client);
+        using var second = new MirrorClient(uri, client);
+        var error = await Assert.ThrowsAsync<MirrorAccessException>(() => first.GetPageAsync(uri, CancellationToken.None));
+        Assert.Equal(500, error.StatusCode);
+        var blocked = await Assert.ThrowsAsync<MirrorAccessException>(() => second.GetPageAsync(uri, CancellationToken.None));
+        Assert.Equal(500, blocked.StatusCode);
+        Assert.Equal(1, calls);
+    }
+
+    private sealed class Counting500Handler(Action onRequest) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            onRequest();
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.InternalServerError));
+        }
+    }
+    [Fact]
     public async Task ConcurrentChallengesShareOneRenewal()
     {
-        var barrier = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var pages = 0; var checks = 0;
+        var checks = 0;
         using var handler = new AsyncHandler(async request => {
+            await Task.Yield();
             if (request.RequestUri!.AbsolutePath.Contains("pass-challenge")) {
                 Interlocked.Increment(ref checks);
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") };
             }
-            var count = Interlocked.Increment(ref pages);
-            if (count <= 2) {
-                if (count == 2) barrier.TrySetResult();
-                await barrier.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            if (Volatile.Read(ref checks) == 0) {
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Challenge) };
             }
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") };
@@ -40,8 +60,8 @@ public sealed class MirrorClientTests
     {
         var handler = new SequenceHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent(Challenge) });
         using var client = new HttpClient(handler);
-        using var mirror = new MirrorClient(new Uri("https://example.test/"), client);
-        var error = await Assert.ThrowsAsync<MirrorAccessException>(() => mirror.GetPageAsync(new Uri("https://example.test/one"), CancellationToken.None));
+        using var mirror = new MirrorClient(new Uri("https://immediate-500.test/"), client);
+        var error = await Assert.ThrowsAsync<MirrorAccessException>(() => mirror.GetPageAsync(new Uri("https://immediate-500.test/one"), CancellationToken.None));
         Assert.Equal(500, error.StatusCode);
         Assert.Equal(1, handler.Count);
     }

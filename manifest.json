@@ -5,6 +5,14 @@
     "description": "Каталог фильмов и сериалов HDrezka с данными TMDB и бесплатными озвучками.",
     "versions": [
       {
+        "timestamp": "2026-11-15T00:00:00Z",
+        "targetAbi": "12.4.0.0",
+        "changelog": "Загрузка фильмов и сериалов в локальные медиатеки, управление очередью, названия серий и исправление названий озвучек.",
+        "checksum": "cb930486e7d951ddff76b9b6877bb083",
+        "sourceUrl": "https://github.com/DvjFrost/Jellyfin_HDrezka/releases/download/v0.2.0/HDrezka-v0.2.0.zip",
+        "version": "0.2.0.0"
+      },
+      {
         "timestamp": "2026-11-14T00:00:00Z",
         "targetAbi": "12.4.0.0",
         "changelog": "Первая тестовая версия",

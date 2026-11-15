@@ -54,11 +54,13 @@
             <div id="hdrezkaStatus" role="status" aria-live="polite"></div>
             <button is="emby-button" type="submit" class="raised button-submit block"><span>Сохранить</span></button>
         </form>
+
     </div></div>
     <script>
     (function () {
         const pluginId = 'e92a7808-6dc0-45a0-ae64-6d19caa8e93a';
         const page = document.querySelector('#hdrezkaConfig');
+
         const form = page.querySelector('#hdrezkaForm');
         const mirror = page.querySelector('#mirrorUrl');
         const syncDays = page.querySelector('#syncDays');

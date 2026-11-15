@@ -24,6 +24,8 @@ public sealed class MirrorClient : IDisposable
     private static long _lastRequestTimestamp;
     private sealed class ChallengeState { public readonly SemaphoreSlim Gate = new(1, 1); public long Generation; }
     private static readonly ConcurrentDictionary<string, ChallengeState> Challenges = new(StringComparer.OrdinalIgnoreCase);
+    private sealed class MirrorRequestState { public readonly SemaphoreSlim Gate = new(1, 1); public bool Blocked; }
+    private static readonly ConcurrentDictionary<string, MirrorRequestState> MirrorRequests = new(StringComparer.OrdinalIgnoreCase);
     private ChallengeState Challenge => Challenges.GetOrAdd(_mirror.GetLeftPart(UriPartial.Authority), static _ => new ChallengeState());
     private Uri _effective;
 
@@ -120,6 +122,11 @@ public sealed class MirrorClient : IDisposable
         for (var i = 0; i < 6; i++)
         {
             if (!IsAllowed(uri)) throw new MirrorAccessException("Зеркало перенаправило запрос на неподтверждённый адрес.");
+            var requestState = MirrorRequests.GetOrAdd(_mirror.GetLeftPart(UriPartial.Authority), static _ => new MirrorRequestState());
+            await requestState.Gate.WaitAsync(token).ConfigureAwait(false);
+            try
+            {
+            if (requestState.Blocked) throw new MirrorAccessException("Запросы к зеркалу остановлены после HTTP 500.", 500);
             await WaitForRequestTurnAsync(token).ConfigureAwait(false);
             using var request = new HttpRequestMessage(method, uri);
             request.Headers.TryAddWithoutValidation("User-Agent", Agent);
@@ -131,7 +138,11 @@ public sealed class MirrorClient : IDisposable
             if (referer is not null && referer.Host.Equals(uri.Host, StringComparison.OrdinalIgnoreCase)) request.Headers.Referrer = referer;
             if (method == HttpMethod.Post && form is not null) { request.Content = new FormUrlEncodedContent(form); request.Headers.TryAddWithoutValidation("X-Requested-With", "XMLHttpRequest"); }
             using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
-            if (response.StatusCode == HttpStatusCode.InternalServerError) throw new MirrorAccessException("Зеркало вернуло HTTP 500; обработка остановлена.", 500);
+            if (response.StatusCode == HttpStatusCode.InternalServerError)
+            {
+                requestState.Blocked = true;
+                throw new MirrorAccessException("Зеркало вернуло HTTP 500; обработка остановлена.", 500);
+            }
             if (_sharedClient && response.Headers.Contains("Set-Cookie"))
                 await MirrorSessionRegistry.SaveAsync(_mirror, token).ConfigureAwait(false);
             if ((int)response.StatusCode is >= 300 and <= 399 && response.Headers.Location is not null)
@@ -145,6 +156,8 @@ public sealed class MirrorClient : IDisposable
             var body = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
             if (body.Length > maxLength) throw new MirrorAccessException("Ответ зеркала слишком большой.");
             return new Page(uri, (int)response.StatusCode, body);
+            }
+            finally { requestState.Gate.Release(); }
         }
         throw new MirrorAccessException("Слишком много перенаправлений зеркала.");
     }

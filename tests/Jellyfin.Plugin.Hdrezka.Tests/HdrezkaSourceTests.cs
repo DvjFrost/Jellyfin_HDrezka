@@ -5,6 +5,35 @@ using Xunit;
 public sealed class HdrezkaSourceTests
 {
     [Fact]
+    public async Task SelectedVoiceReturnsAllAlternativesWithoutExtraRequests()
+    {
+        var handler = new Handler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"success\":true,\"url\":\"[720p]https://cdn.example/file.mp4 or https://cdn.example/playlist.m3u8\"}") }));
+        using var http = new HttpClient(handler);
+        using var mirror = new MirrorClient(new Uri("https://example.test/"), http);
+        var source = new HdrezkaSource(mirror);
+        var voice = new FreeVoice("56", "123", "Free", "0", "0", "0");
+        var streams = await source.MovieVoiceAlternativesFromListingAsync("/films/test/123-title.html", voice, CancellationToken.None);
+        Assert.Equal(new[] { "/file.mp4", "/playlist.m3u8" }, streams.Select(x => x.Stream.Url.AbsolutePath));
+        Assert.Equal(1, handler.Count);
+    }
+
+    [Fact]
+    public async Task SelectedEpisodeReturnsAllAlternativesInOneRequest()
+    {
+        var handler = new Handler(async request => {
+            var body = await request.Content!.ReadAsStringAsync();
+            Assert.Contains("season=2", body);
+            Assert.Contains("episode=3", body);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"success\":true,\"url\":\"[720p]https://cdn.example/a.mp4 or https://cdn.example/b.m3u8\"}") };
+        });
+        using var http = new HttpClient(handler);
+        using var mirror = new MirrorClient(new Uri("https://example.test/"), http);
+        var voice = new FreeVoice("56", "123", "Free", "0", "0", "0");
+        var streams = await new HdrezkaSource(mirror).EpisodeAlternativesFromListingAsync("/series/test/123-title.html", voice, "2", "3", CancellationToken.None);
+        Assert.Equal(new[] { "/a.mp4", "/b.m3u8" }, streams.Select(x => x.Stream.Url.AbsolutePath));
+        Assert.Equal(1, handler.Count);
+    }
+    [Fact]
     public async Task ActiveVoiceUsesEpisodesEmbeddedInCardWithoutPost()
     {
         const string html = "<div class='b-post__title'><h1>Title</h1></div><script>initCDNSeriesEvents</script><li class='b-translator__item active' data-id='123' data-translator_id='56'>Free</li><ul class='b-simple_episodes__list' id='simple-episodes-list-1'><li class='b-simple_episode__item' data-episode_id='1'>One</li></ul>";
@@ -15,6 +44,19 @@ public sealed class HdrezkaSourceTests
         var listing = await source.DetailAndVoicesAsync("/series/test/123-title.html", CancellationToken.None);
         var episodes = await source.EpisodesFromListingAsync("/series/test/123-title.html", listing, Assert.Single(listing.Voices), CancellationToken.None);
         Assert.Single(episodes);
+        Assert.Equal(1, handler.Count);
+    }
+    [Fact]
+    public async Task EpisodeNamesComeFromSameCardWithoutExtraRequests()
+    {
+        const string html = "<div class='b-post__title'><h1>Title</h1></div><script>initCDNSeriesEvents</script><li class='b-translator__item active' data-id='123' data-translator_id='56'>Free</li><ul class='b-simple_episodes__list' id='simple-episodes-list-1'><li class='b-simple_episode__item' data-episode_id='1'>Серия 1</li></ul><div class='b-post__schedule_block'><div class='b-post__schedule_block_title'><div class='title'>1 сезон</div></div><table><tr><td class='td-1'>1 серия</td><td class='td-2'><b>Пилот</b><span>Pilot</span></td></tr></table></div>";
+        var handler = new Handler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(html) }));
+        using var http = new HttpClient(handler);
+        using var mirror = new MirrorClient(new Uri("https://schedule-source.test/"), http);
+        var source = new HdrezkaSource(mirror);
+        var listing = await source.DetailAndVoicesAsync("/series/test/123-title.html", CancellationToken.None);
+        var episodes = await source.EpisodesFromListingAsync("/series/test/123-title.html", listing, Assert.Single(listing.Voices), CancellationToken.None);
+        Assert.Equal("Пилот", Assert.Single(episodes).Title);
         Assert.Equal(1, handler.Count);
     }
     [Fact]
