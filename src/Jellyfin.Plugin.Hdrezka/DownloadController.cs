@@ -16,7 +16,7 @@ public sealed record DownloadItemOptions(Guid ItemId, string Title, bool Series,
 [ApiController]
 [Route("Hdrezka/Downloads")]
 [Authorize(Policy = "RequiresElevation")]
-public sealed class DownloadController(DownloadService downloads, ILibraryManager library, LibraryMediaProvider media) : ControllerBase
+public sealed class DownloadController(DownloadService downloads, ILibraryManager library, LibraryMediaProvider media, SitemapDetailCoordinator details) : ControllerBase
 {
     [HttpGet("Destinations")]
     public ActionResult<IReadOnlyList<DownloadDestination>> Destinations() => Ok(DownloadLibraries.List(library.GetVirtualFolders(), media.Root));
@@ -50,6 +50,20 @@ public sealed class DownloadController(DownloadService downloads, ILibraryManage
         var record = item is null ? null : media.Record(item);
         if (item is not Video || record is null) return NotFound();
         return Ok(new DownloadItemOptions(item.Id, item.Name, record.Season is not null, record.Voices));
+    }
+
+    [HttpPost("Items/{id:guid}/Prepare")]
+    public async Task<ActionResult> PrepareItem(Guid id, CancellationToken token)
+    {
+        var item = library.GetItemById(id);
+        if (item is Series series)
+        {
+            if (string.IsNullOrEmpty(series.Path) || LibrarySeriesLocator.Load(media.Root, series.Path) is null) return NotFound();
+        }
+        else if (item is not Video || media.Record(item) is not { Season: null }) return NotFound();
+        var replacement = await details.PrepareAsync(item, token).ConfigureAwait(false);
+        var updated = replacement is { } replacementId ? library.GetItemById(replacementId) : library.GetItemById(id);
+        return updated is null ? NotFound() : Ok(new { updated.Id, updated.Name });
     }
 
     [HttpPost("Queue")]

@@ -53,6 +53,7 @@
         let selectedDownloadItem = null;
         let downloadEpisodes = [];
         let destinations = [];
+        let selectionVersion = 0;
         const get = path => ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl(path), dataType: 'json' });
         const post = (path, body) => ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl(path), data: JSON.stringify(body), contentType: 'application/json' });
         const remove = path => ApiClient.ajax({ type: 'DELETE', url: ApiClient.getUrl(path) });
@@ -62,18 +63,19 @@
             for (const destination of destinations.filter(item => item.Series === series))
                 downloadDestination.add(new Option(destination.Name + ' — ' + destination.Path, destination.Id));
         }
-        async function loadDownloadItem(id) {
+        async function loadDownloadItem(id, selection = selectionVersion) {
             selectedDownloadItem = null;
             clearSelect(downloadVoice, 'Выберите озвучку');
             if (!id) return;
             try {
                 const item = await get('Hdrezka/Downloads/Items/' + encodeURIComponent(id));
+                if (selection !== selectionVersion) return;
                 selectedDownloadItem = item;
                 for (const voice of item.Voices) downloadVoice.add(new Option(voice.Title, voice.Id));
                 if (item.Voices.length === 1) downloadVoice.value = item.Voices[0].Id;
                 fillDestinations(item.Series);
-                downloadStatus.textContent = item.Voices.length ? 'Выберите озвучку, качество и медиатеку.' : 'Откройте карточку видео в Jellyfin и дождитесь загрузки бесплатных озвучек.';
-            } catch (_) { downloadStatus.textContent = 'Не удалось получить озвучки. Сначала откройте карточку видео в Jellyfin.'; }
+                downloadStatus.textContent = item.Voices.length ? 'Выберите озвучку, качество и медиатеку.' : 'Бесплатные озвучки не найдены. Проверьте доступность зеркала.';
+            } catch (_) { if (selection === selectionVersion) downloadStatus.textContent = 'Не удалось получить озвучки. Проверьте доступность зеркала.'; }
         }
         async function refreshDownloads() {
             try {
@@ -118,6 +120,7 @@
         }
         downloadSearch.addEventListener('submit', async event => {
             event.preventDefault();
+            selectionVersion++;
             downloadStatus.textContent = 'Ищем в локальном каталоге…';
             clearSelect(downloadItem, 'Выберите видео');
             clearSelect(downloadVoice, 'Выберите озвучку');
@@ -140,6 +143,7 @@
             } catch (_) { downloadStatus.textContent = 'Не удалось выполнить поиск.'; }
         });
         downloadItem.addEventListener('change', async () => {
+            const selection = ++selectionVersion;
             episodeGroup.hidden = true;
             scopeGroup.hidden = true;
             multiGroup.hidden = true;
@@ -147,13 +151,19 @@
             clearSelect(downloadEpisode, 'Выберите серию');
             const selected = downloadItem.selectedOptions[0];
             if (!downloadItem.value) return;
-            if (selected.dataset.type !== 'Series') { await loadDownloadItem(downloadItem.value); return; }
             selectedDownloadItem = null;
             clearSelect(downloadVoice, 'Выберите озвучку');
-            episodeGroup.hidden = false;
-            scopeGroup.hidden = false;
+            const id = downloadItem.value;
+            downloadStatus.textContent = 'Загружаем сведения о видео и бесплатные озвучки…';
             try {
-                const result = await ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Shows/' + downloadItem.value + '/Episodes', { UserId: ApiClient.getCurrentUserId() }), dataType: 'json' });
+                const prepared = await ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Hdrezka/Downloads/Items/' + encodeURIComponent(id) + '/Prepare'), dataType: 'json' });
+                if (selection !== selectionVersion) return;
+                selected.text = prepared.Name;
+                if (selected.dataset.type !== 'Series') { await loadDownloadItem(prepared.Id, selection); return; }
+                episodeGroup.hidden = false;
+                scopeGroup.hidden = false;
+                const result = await ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Shows/' + prepared.Id + '/Episodes', { UserId: ApiClient.getCurrentUserId() }), dataType: 'json' });
+                if (selection !== selectionVersion) return;
                 downloadEpisodes = result.Items || [];
                 const choices = document.createDocumentFragment();
                 for (const episode of downloadEpisodes) {
@@ -166,8 +176,8 @@
                     row.append(checkbox, text); choices.append(row);
                 }
                 downloadMulti.replaceChildren(choices);
-                downloadStatus.textContent = downloadEpisode.length > 1 ? 'Выберите серию.' : 'Откройте карточку сериала в Jellyfin, чтобы загрузить список серий.';
-            } catch (_) { downloadStatus.textContent = 'Не удалось получить список серий.'; }
+                downloadStatus.textContent = downloadEpisode.length > 1 ? 'Выберите серию.' : 'Не удалось получить серии. Проверьте доступность зеркала.';
+            } catch (_) { if (selection === selectionVersion) downloadStatus.textContent = 'Не удалось загрузить сведения о видео. Проверьте доступность зеркала.'; }
         });
         downloadEpisode.addEventListener('change', () => loadDownloadItem(downloadEpisode.value));
         page.querySelector('#downloadScope').addEventListener('change', event => { multiGroup.hidden = event.target.value !== 'multiple'; });
