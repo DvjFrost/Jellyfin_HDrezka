@@ -7,6 +7,14 @@
       {
         "timestamp": "2026-11-15T00:00:00Z",
         "targetAbi": "12.4.0.0",
+        "changelog": "Автоматическое получение сведений, бесплатных озвучек и серий при выборе видео на странице загрузок.",
+        "checksum": "323058b6e5a239151d3f3fc50e793afe",
+        "sourceUrl": "https://raw.githubusercontent.com/DvjFrost/Jellyfin_HDrezka/main/packages/HDrezka-v0.2.1.zip",
+        "version": "0.2.1.0"
+      },
+      {
+        "timestamp": "2026-11-15T00:00:00Z",
+        "targetAbi": "12.4.0.0",
         "changelog": "Загрузка фильмов и сериалов в локальные медиатеки, управление очередью, названия серий и исправление названий озвучек.",
         "checksum": "cb930486e7d951ddff76b9b6877bb083",
         "sourceUrl": "https://github.com/DvjFrost/Jellyfin_HDrezka/releases/download/v0.2.0/HDrezka-v0.2.0.zip",
