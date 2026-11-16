@@ -14,9 +14,12 @@ public static class SeriesLibraryWriter
         if (!detail.HasEpisodes) throw new ArgumentException("A movie cannot be written as a series.", nameof(detail));
         var dir = Path.Combine(Path.GetFullPath(root), LibraryPath.TitleDirectory(id));
         Directory.CreateDirectory(dir);
-        var nfo = new XDocument(new XElement("tvshow", new XElement("title", detail.Title), new XElement("plot", detail.Overview), MovieLibraryWriter.YearElement(entry.Description),
-            entry.Poster is null ? null : new XElement("thumb", entry.Poster.AbsoluteUri)));
-        await MovieLibraryWriter.AtomicWriteAsync(Path.Combine(dir, "tvshow.nfo"), nfo.ToString(), token).ConfigureAwait(false);
+        var nfoPath = Path.Combine(dir, "tvshow.nfo");
+        await MetadataFileLock.RunAsync(nfoPath, async () =>
+        {
+            var nfo = MovieLibraryWriter.MergeNfo(nfoPath, "tvshow", entry, detail);
+            await MovieLibraryWriter.AtomicWriteAsync(nfoPath, nfo.ToString(), token).ConfigureAwait(false);
+        }, token).ConfigureAwait(false);
         var episodes = available.SelectMany(v => v.Episodes.Select(e => (v.Voice, Episode: e)))
             .GroupBy(x => (x.Episode.Season, x.Episode.Number));
         foreach (var group in episodes)

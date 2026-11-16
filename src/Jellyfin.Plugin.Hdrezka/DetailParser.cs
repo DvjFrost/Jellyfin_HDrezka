@@ -3,7 +3,14 @@ using System.Text;
 
 namespace Jellyfin.Plugin.Hdrezka;
 
-public sealed record CatalogDetail(string Title, string Overview, bool HasEpisodes, Uri? Poster = null);
+public sealed record CatalogDetail(string Title, string Overview, bool HasEpisodes, Uri? Poster = null)
+{
+    public IReadOnlyList<string> Genres { get; init; } = [];
+    public IReadOnlyList<string> Actors { get; init; } = [];
+    public IReadOnlyList<string> Directors { get; init; } = [];
+    public string? Tagline { get; init; }
+    public double? ImdbRating { get; init; }
+}
 
 public static class DetailParser
 {
@@ -27,7 +34,15 @@ public static class DetailParser
                 || host.Equals("hdrezka.ag", StringComparison.OrdinalIgnoreCase) || host.EndsWith(".hdrezka.ag", StringComparison.OrdinalIgnoreCase);
             if (trusted && absolute.Scheme == Uri.UriSchemeHttps && absolute.Port == 443 && string.IsNullOrEmpty(absolute.UserInfo)) poster = absolute;
         }
-        return new CatalogDetail(title, overview, hasEpisodes, poster);
+        var genres = (doc.DocumentNode.SelectNodes("//*[@itemprop='genre']") ?? Enumerable.Empty<HtmlNode>()).Select(Text).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var actors = (doc.DocumentNode.SelectNodes("//*[@itemprop='actor']//*[@itemprop='name']") ?? Enumerable.Empty<HtmlNode>()).Select(Text).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var directors = (doc.DocumentNode.SelectNodes("//*[@itemprop='director']//*[@itemprop='name']") ?? Enumerable.Empty<HtmlNode>()).Select(Text).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var tagline = (doc.DocumentNode.SelectNodes("//table[contains(concat(' ',normalize-space(@class),' '),' b-post__info ')]//tr") ?? Enumerable.Empty<HtmlNode>())
+            .Where(row => Text(row.SelectSingleNode(".//h2")).Equals("Слоган", StringComparison.OrdinalIgnoreCase))
+            .Select(row => Text(row.SelectNodes("./td")?.LastOrDefault())).FirstOrDefault();
+        var imdb = Text(doc.DocumentNode.SelectSingleNode("//*[contains(concat(' ',normalize-space(@class),' '),' b-post__info_rates ') and contains(concat(' ',normalize-space(@class),' '),' imdb ')]//*[contains(concat(' ',normalize-space(@class),' '),' bold ')]"));
+        double? rating = double.TryParse(imdb.Replace(',', '.'), System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture, out var parsed) && parsed is >= 0 and <= 10 ? parsed : null;
+        return new CatalogDetail(title, overview, hasEpisodes, poster) { Genres = genres, Actors = actors, Directors = directors, Tagline = tagline, ImdbRating = rating };
     }
 
     private static string Text(HtmlNode? node)

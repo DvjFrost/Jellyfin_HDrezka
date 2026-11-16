@@ -12,7 +12,9 @@ public sealed class SitemapIndexTask(IApplicationPaths paths, LibraryMediaProvid
     public string Description => "Загрузить каталог из sitemap и при наличии ключа дополнить данные из TMDB.";
     public string Category => "HDrezka";
     public string Key => "HdrezkaSitemapTmdbIndex";
-    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => [new() { Type = TaskTriggerInfoType.StartupTrigger }, new() { Type = TaskTriggerInfoType.IntervalTrigger, IntervalTicks = TimeSpan.FromDays(1).Ticks }];
+    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("HDREZKA_TMDB_PILOT_IDS"))
+        ? [new() { Type = TaskTriggerInfoType.StartupTrigger }, new() { Type = TaskTriggerInfoType.IntervalTrigger, IntervalTicks = TimeSpan.FromDays(1).Ticks }]
+        : [];
 
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {

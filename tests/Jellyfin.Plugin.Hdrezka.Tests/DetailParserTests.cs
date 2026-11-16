@@ -4,6 +4,16 @@ using Xunit;
 public sealed class DetailParserTests
 {
     [Fact]
+    public void ExtractsStructuredCreditsGenresAndImdbRating()
+    {
+        const string html = "<div class='b-post__title'><h1>Тест</h1></div><table class='b-post__info'><tr><td><h2>Жанр</h2>:</td><td><a><span itemprop='genre'>Драма</span></a>, <a><span itemprop='genre'>Боевик</span></a></td></tr><tr><td><h2>Слоган</h2>:</td><td>Всё получится</td></tr><tr><td><h2>В ролях</h2>:</td><td><span itemprop='actor'><span itemprop='name'>Актёр Один</span></span></td></tr><tr><td><h2>Рейтинги</h2>:</td><td><span class='b-post__info_rates imdb'>IMDb: <span class='bold'>8.1</span></span></td></tr></table>";
+        var detail = DetailParser.Parse(html)!;
+        Assert.Equal(new[] { "Драма", "Боевик" }, detail.Genres);
+        Assert.Equal(new[] { "Актёр Один" }, detail.Actors);
+        Assert.Equal("Всё получится", detail.Tagline);
+        Assert.Equal(8.1, detail.ImdbRating);
+    }
+    [Fact]
     public void PosterAcceptsKnownImageHostAndRejectsUnrelatedLocalAddress()
     {
         const string valid = "<div class='b-post__title'><h1>Title</h1></div><div class='b-sidecover'><img src='https://static.hdrezka.ac/i/a.jpg'></div>";

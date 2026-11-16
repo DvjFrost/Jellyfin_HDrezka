@@ -56,11 +56,32 @@ public sealed class SitemapDetailCoordinator(LibraryMediaProvider media, ILibrar
                 return replacement;
             }
             var nfoPath = Path.Combine(root, section, LibraryPath.TitleDirectory(id), series ? "tvshow.nfo" : "movie.nfo");
+            // Deliberately limited to explicitly listed test items during the pilot.
+            // Without the environment variable this code never contacts TMDB.
+            var pilotIds = (Environment.GetEnvironmentVariable("HDREZKA_TMDB_PILOT_IDS") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var tmdbToken = Plugin.Instance?.Configuration.TmdbReadAccessToken;
+            if (pilotIds.Contains(id, StringComparer.Ordinal) && !string.IsNullOrWhiteSpace(tmdbToken))
+            {
+                try
+                {
+                    var nfo = System.Xml.Linq.XDocument.Load(nfoPath);
+                    var tmdbIdText = nfo.Root?.Element("tmdbid")?.Value;
+                    var marker = Path.Combine(Path.GetDirectoryName(nfoPath)!, "hdrezka-tmdb-details.txt");
+                    if (int.TryParse(tmdbIdText, out var tmdbId) && tmdbId > 0 && (!File.Exists(marker) || (await File.ReadAllTextAsync(marker, token).ConfigureAwait(false)).Trim() != tmdbIdText))
+                    {
+                        using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
+                        await TmdbMetadataWriter.EnrichAsync(nfoPath, tmdbId, series, new TmdbClient(http, tmdbToken), token).ConfigureAwait(false);
+                        await MovieLibraryWriter.AtomicWriteAsync(marker, tmdbIdText!, token).ConfigureAwait(false);
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                { logger.LogWarning("Could not enrich pilot item from TMDB: {ErrorType}", ex.GetType().Name); }
+            }
             var hydratedName = System.Xml.Linq.XDocument.Load(nfoPath).Root?.Element("title")?.Value;
             if (item is Folder folder)
             {
                 var options = new MediaBrowser.Controller.Providers.MetadataRefreshOptions(new MediaBrowser.Controller.Providers.DirectoryService(BaseItem.FileSystem))
-                { MetadataRefreshMode = MediaBrowser.Controller.Providers.MetadataRefreshMode.FullRefresh, EnableRemoteContentProbe = false, ForceSave = true };
+                { MetadataRefreshMode = MediaBrowser.Controller.Providers.MetadataRefreshMode.Default, EnableRemoteContentProbe = false, ForceSave = true };
                 await folder.RefreshMetadata(options, token).ConfigureAwait(false);
                 if (!string.IsNullOrWhiteSpace(hydratedName) && folder.Name != hydratedName)
                 {
@@ -81,7 +102,7 @@ public sealed class SitemapDetailCoordinator(LibraryMediaProvider media, ILibrar
                         var existing = library.GetLocalAlternateVersionIds(primary).Select(library.GetItemById).OfType<Video>().Select(v => v.Path).Where(p => !string.IsNullOrEmpty(p));
                         primary.LocalAlternateVersions = MovieVersionPaths.Collect(Path.GetDirectoryName(primary.Path)!, updated.Id, updated.Voices, existing!).ToArray();
                         var options = new MediaBrowser.Controller.Providers.MetadataRefreshOptions(new MediaBrowser.Controller.Providers.DirectoryService(BaseItem.FileSystem))
-                        { MetadataRefreshMode = MediaBrowser.Controller.Providers.MetadataRefreshMode.FullRefresh, EnableRemoteContentProbe = false, ForceSave = true };
+                        { MetadataRefreshMode = MediaBrowser.Controller.Providers.MetadataRefreshMode.Default, EnableRemoteContentProbe = false, ForceSave = true };
                         await primary.RefreshMetadata(options, token).ConfigureAwait(false);
                         if (!string.IsNullOrWhiteSpace(hydratedName) && primary.Name != hydratedName)
                         {

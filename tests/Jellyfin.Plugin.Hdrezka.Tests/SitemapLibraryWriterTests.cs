@@ -3,6 +3,40 @@ using Xunit;
 
 public sealed class SitemapLibraryWriterTests
 {
+    [Theory]
+    [InlineData(CatalogKind.Movie, "films", "movie.nfo")]
+    [InlineData(CatalogKind.Series, "series", "tvshow.nfo")]
+    public async Task KeepsUserTitleWhenAddingTmdbMatch(CatalogKind kind, string section, string nfoName)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "hdrezka-preserved-title-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var video = new SitemapVideo("123", "sample", 2020, kind, new Uri("https://example.test/films/a/123-sample.html"));
+            await SitemapLibraryWriter.WriteAsync(root, video, null, CancellationToken.None);
+            var match = new TmdbMatch("123", TmdbMatchStatus.Matched, 456, "TMDB title", null, kind == CatalogKind.Series ? "tv" : "movie");
+            await SitemapLibraryWriter.WriteAsync(root, video, match, CancellationToken.None, "Моё название");
+            var nfo = System.Xml.Linq.XDocument.Load(Path.Combine(root, section, "HDrezka-123", nfoName));
+            Assert.Equal("Моё название", nfo.Root!.Element("title")?.Value);
+            Assert.Equal("456", nfo.Root!.Element("tmdbid")?.Value);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+    [Theory]
+    [InlineData(CatalogKind.Movie, "films", "movie.nfo")]
+    [InlineData(CatalogKind.Series, "series", "tvshow.nfo")]
+    public async Task StoresMatchedTmdbIdForJellyfin(CatalogKind kind, string section, string nfoName)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "hdrezka-tmdb-id-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var video = new SitemapVideo("123", "sample", 2020, kind, new Uri("https://example.test/films/a/123-sample.html"));
+            var match = new TmdbMatch("123", TmdbMatchStatus.Matched, 456, "Название", null, kind == CatalogKind.Series ? "tv" : "movie");
+            await SitemapLibraryWriter.WriteAsync(root, video, match, CancellationToken.None);
+            var nfo = System.Xml.Linq.XDocument.Load(Path.Combine(root, section, "HDrezka-123", nfoName));
+            Assert.Equal("456", nfo.Root!.Element("tmdbid")?.Value);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
     [Fact]
     public async Task CreatesTransliteratedCardWithoutTmdbAndEnrichesSameFilesLater()
     {

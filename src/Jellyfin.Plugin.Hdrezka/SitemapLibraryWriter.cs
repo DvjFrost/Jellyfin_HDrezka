@@ -8,11 +8,11 @@ public sealed record LibrarySeriesRecord(string Id, string Path);
 
 public static class SitemapLibraryWriter
 {
-    public static async Task WriteAsync(string root, SitemapVideo video, TmdbMatch? match, CancellationToken token)
+    public static async Task WriteAsync(string root, SitemapVideo video, TmdbMatch? match, CancellationToken token, string? preservedTitle = null)
     {
         if (match is not null && match.Id != video.Id) throw new ArgumentException("TMDB result belongs to another video.", nameof(match));
         var matched = match?.Status == TmdbMatchStatus.Matched && !string.IsNullOrWhiteSpace(match.Title);
-        var title = matched ? match!.Title : video.Query;
+        var title = !string.IsNullOrWhiteSpace(preservedTitle) ? preservedTitle : matched ? match!.Title : video.Query;
         Uri? poster = null;
         if (match?.Status == TmdbMatchStatus.Matched && match.PosterPath is { } p && Regex.IsMatch(p, @"^/[a-zA-Z0-9_-]+\.(jpg|png|webp)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
             poster = new Uri("https://image.tmdb.org/t/p/w500" + p);
@@ -61,6 +61,17 @@ public static class SitemapLibraryWriter
             var primary = Path.Combine(dir, LibraryPath.PrimaryFileName(video.Id));
             var existing = File.Exists(primary) ? LibraryRecordLocator.Load(root, primary) : null;
             await MovieLibraryWriter.WriteAsync(library, entry, new CatalogDetail(title!, overview, false), existing?.Voices ?? [], token).ConfigureAwait(false);
+        }
+        if (matched && match?.TmdbId is > 0)
+        {
+            await MetadataFileLock.RunAsync(nfo, async () =>
+            {
+                var document = XDocument.Load(nfo);
+                var existing = document.Root?.Element("tmdbid");
+                if (existing is null) document.Root?.Add(new XElement("tmdbid", match.TmdbId.Value));
+                // Existing identifiers can be user-corrected in Jellyfin and must not be overwritten.
+                await MovieLibraryWriter.AtomicWriteAsync(nfo, document.ToString(), token).ConfigureAwait(false);
+            }, token).ConfigureAwait(false);
         }
         await SitemapMetadataStore.WriteAsync(dir, new SitemapMetadata(video.Id, matched || keepTmdbMetadata, keepSiteMetadata || keepExistingMetadata), token).ConfigureAwait(false);
     }

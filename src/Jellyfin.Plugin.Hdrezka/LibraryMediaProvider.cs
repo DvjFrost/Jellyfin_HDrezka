@@ -168,6 +168,13 @@ public sealed class LibraryMediaProvider(IApplicationPaths paths, ILibraryManage
                             return result;
                         }, value => MediaInfoMerger.Apply(option, value), ct).ConfigureAwait(false);
                         if (!MediaInfoMerger.Apply(option, probe)) return false;
+                        foreach (var target in new[] { video, primary }.DistinctBy(x => x.Id))
+                        {
+                            if (!PlaybackRuntime.TryFill(target, option.RunTimeTicks)) continue;
+                            try { await library.UpdateItemAsync(target, target.GetParent(), ItemUpdateType.MetadataEdit, ct).ConfigureAwait(false); }
+                            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                            { logger.LogWarning("Could not save HDrezka playback duration: {ErrorType}", ex.GetType().Name); }
+                        }
                         if (PlaybackSelection.Current is not null) NextEpisodeVoice.Shared.Observe(user, device, record, voice.Id, option.RunTimeTicks);
                         logger.LogInformation("HDrezka selected voice {Voice}; automatic episode continuation: {Continuation}", voice.Title, alias is not null);
                         media = option;

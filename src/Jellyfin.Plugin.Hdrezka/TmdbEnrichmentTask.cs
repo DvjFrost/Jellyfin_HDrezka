@@ -14,7 +14,7 @@ namespace Jellyfin.Plugin.Hdrezka;
 public sealed class TmdbEnrichmentTask(IApplicationPaths paths, LibraryMediaProvider media, ILibraryManager library, ITaskManager tasks, ILogger<TmdbEnrichmentTask> logger) : IScheduledTask
 {
     public string Name => "Обновить данные HDrezka из TMDB";
-    public string Description => "После создания каталога дополнить названия и постеры из TMDB.";
+    public string Description => "Дополнить подтверждённые фильмы и сериалы описаниями, актёрами, рейтингами и изображениями TMDB.";
     public string Category => "HDrezka";
     public string Key => "HdrezkaTmdbEnrichment";
     public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => [];
@@ -35,11 +35,14 @@ public sealed class TmdbEnrichmentTask(IApplicationPaths paths, LibraryMediaProv
             return;
         }
         var videos = (JsonSerializer.Deserialize<List<SitemapVideo>>(await File.ReadAllTextAsync(Path.Combine(indexDir, "sitemap.json"), cancellationToken).ConfigureAwait(false)) ?? []).Where(x => x.Kind is CatalogKind.Movie or CatalogKind.Series).ToList();
+        var pilotIds = (Environment.GetEnvironmentVariable("HDREZKA_TMDB_PILOT_IDS") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.Ordinal);
+        if (pilotIds.Count > 0) videos = videos.Where(v => pilotIds.Contains(v.Id)).ToList();
         var store = new TmdbMatchStore(Path.Combine(indexDir, "tmdb-matches.jsonl"));
         var cached = await store.LoadAsync(cancellationToken).ConfigureAwait(false);
         using var handler = new HttpClientHandler { AllowAutoRedirect = false };
         using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
-        var matcher = new TmdbMatcher(new TmdbClient(http, token), TimeSpan.FromMilliseconds(200));
+        var tmdbClient = new TmdbClient(http, token);
+        var matcher = new TmdbMatcher(tmdbClient, TimeSpan.FromMilliseconds(200));
         var update = new Progress<TmdbIndexSummary>(s => { if (s.Total > 0) progress.Report((double)s.Processed * 100 / s.Total); });
         var root = media.Root;
         var summary = await new TmdbIndex(matcher, store).RunAsync(videos, cancellationToken, update, async (video, match, ct) =>
@@ -47,17 +50,45 @@ public sealed class TmdbEnrichmentTask(IApplicationPaths paths, LibraryMediaProv
             if (match.Status != TmdbMatchStatus.Matched) return;
             var section = video.Kind switch { CatalogKind.Movie => "films", CatalogKind.Series => "series", CatalogKind.Anime => "animation", CatalogKind.Show => "show", _ => "cartoons" };
             var dir = Path.Combine(root, section, LibraryPath.TitleDirectory(video.Id));
-            var upToDate = cached.TryGetValue(video.Id, out var old) && TmdbMatcher.IsCurrent(video, old) && SitemapMetadataStore.Read(dir, video.Id)?.FromTmdb == true;
-            if (!upToDate) await SitemapLibraryWriter.WriteAsync(root, video, match, ct).ConfigureAwait(false);
-            var isSeries = File.Exists(Path.Combine(dir, "tvshow.nfo"));
+            var isSeries = video.Kind == CatalogKind.Series;
             var itemPath = isSeries ? dir : Path.Combine(dir, LibraryPath.PrimaryFileName(video.Id));
             var type = isSeries ? typeof(Series) : typeof(Movie);
-            if (library.GetItemById(library.GetNewItemId(itemPath, type)) is { } item)
+            var item = library.GetItemById(library.GetNewItemId(itemPath, type));
+            var locked = item is not null && (item.IsLocked || item.LockedFields.Any());
+            var upToDate = cached.TryGetValue(video.Id, out var old) && TmdbMatcher.IsCurrent(video, old) && SitemapMetadataStore.Read(dir, video.Id)?.FromTmdb == true;
+            var preservedTitle = item is not null && !CatalogTitleRepair.ShouldReplace(item.Name, video.Query, match.Title, false) ? item.Name : null;
+            if (!upToDate && !locked) await SitemapLibraryWriter.WriteAsync(root, video, match, ct, preservedTitle).ConfigureAwait(false);
+            var enriched = false;
+            if (match.TmdbId is int matchedId && matchedId > 0 && !locked)
             {
-                if (!upToDate)
+                var nfoPath = Path.Combine(dir, isSeries ? "tvshow.nfo" : "movie.nfo");
+                try
                 {
-                    var options = new MetadataRefreshOptions(new DirectoryService(BaseItem.FileSystem)) { MetadataRefreshMode = MetadataRefreshMode.FullRefresh, EnableRemoteContentProbe = false, ForceSave = true };
-                    await item.RefreshMetadata(options, ct).ConfigureAwait(false);
+                    enriched = await TmdbRetry.RunAsync(t => TmdbMetadataEnricher.ProcessAsync(nfoPath, matchedId, isSeries,
+                        SitemapMetadataStore.Read(dir, video.Id)?.FromTmdb == true, false, tmdbClient, t), ct, TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+                    if (enriched) await Task.Delay(TimeSpan.FromMilliseconds(250), ct).ConfigureAwait(false);
+                }
+                catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+                { logger.LogWarning("TMDB details are unavailable for item {Id}; will retry on a later run", video.Id); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException or System.Text.Json.JsonException or InvalidDataException or InvalidOperationException)
+                { logger.LogWarning("Could not enrich TMDB metadata for item {Id}: {ErrorType}", video.Id, ex.GetType().Name); }
+            }
+            if (item is not null)
+            {
+                var pending = Path.Combine(dir, "hdrezka-tmdb-refresh-pending.txt");
+                if (!locked && (!upToDate || enriched || File.Exists(pending)))
+                {
+                    try
+                    {
+                        // Default lets Jellyfin merge the changed local NFO into existing items.
+                        // FullRefresh without ReplaceAllMetadata keeps stale database values and
+                        // can then save those values back over the newly enriched NFO.
+                        var options = new MetadataRefreshOptions(new DirectoryService(BaseItem.FileSystem)) { MetadataRefreshMode = MetadataRefreshMode.Default, EnableRemoteContentProbe = false, ForceSave = true };
+                        await item.RefreshMetadata(options, ct).ConfigureAwait(false);
+                        if (File.Exists(pending)) File.Delete(pending);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+                    { logger.LogWarning("Could not refresh metadata for item {Id}: {ErrorType}", video.Id, ex.GetType().Name); }
                 }
                 if (CatalogTitleRepair.ShouldReplace(item.Name, video.Query, match.Title, item.IsLocked || item.LockedFields.Contains(MetadataField.Name)))
                 {

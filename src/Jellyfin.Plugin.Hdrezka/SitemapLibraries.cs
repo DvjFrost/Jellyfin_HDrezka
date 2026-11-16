@@ -7,6 +7,32 @@ namespace Jellyfin.Plugin.Hdrezka;
 
 public static class SitemapLibraries
 {
+    public static void ConfigureMetadata(LibraryOptions options, CatalogKind kind)
+    {
+        options.EnableInternetProviders = true;
+        options.SaveLocalMetadata = true;
+        options.MetadataSavers = (options.MetadataSavers ?? []).Append("Nfo").Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var types = (options.TypeOptions ?? []).ToList();
+        TypeOptions For(string type)
+        {
+            var setting = types.FirstOrDefault(x => string.Equals(x.Type, type, StringComparison.OrdinalIgnoreCase));
+            if (setting is null) { setting = new TypeOptions { Type = type }; types.Add(setting); }
+            return setting;
+        }
+        var target = For(kind == CatalogKind.Series ? "Series" : "Movie");
+        target.MetadataFetchers = (target.MetadataFetchers ?? []).Append("TheMovieDb").Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        target.MetadataFetcherOrder = (target.MetadataFetcherOrder ?? []).Append("TheMovieDb").Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        target.ImageFetchers = (target.ImageFetchers ?? []).Append("TheMovieDb").Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        target.ImageFetcherOrder = (target.ImageFetcherOrder ?? []).Append("TheMovieDb").Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (kind == CatalogKind.Series)
+            foreach (var child in new[] { For("Season"), For("Episode") })
+            {
+                if (child.MetadataFetchers is not { Length: > 0 }) child.MetadataFetchers = ["HDrezka"];
+                if (child.ImageFetchers is not { Length: > 0 }) child.ImageFetchers = ["HDrezka"];
+            }
+        options.TypeOptions = types.ToArray();
+    }
+
     public static bool IsObsoleteOwnedLibrary(string name, IReadOnlyList<string> locations, string root)
     {
         var directory = name switch { "Мультфильмы HDrezka" => "cartoons", "Аниме HDrezka" => "animation", "ТВ-шоу HDrezka" => "show", _ => null };
@@ -40,11 +66,21 @@ public static class SitemapLibraries
             if (folder is null)
             {
                 var options = new LibraryOptions { PathInfos = [new MediaPathInfo(path)], EnableRealtimeMonitor = false,
-                    TypeOptions = new[] { "Movie", "Series", "Season", "Episode" }.Select(type => new TypeOptions { Type = type, MetadataFetchers = ["HDrezka"] }).ToArray() };
+                    SaveLocalMetadata = true, MetadataSavers = ["Nfo"],
+                    TypeOptions = new[] { "Movie", "Series", "Season", "Episode" }.Select(type => new TypeOptions { Type = type,
+                        MetadataFetchers = ["HDrezka"], ImageFetchers = ["HDrezka"] }).ToArray() };
+                ConfigureMetadata(options, section.Kind);
                 await library.AddVirtualFolder(section.Name, section.Type, options, false).ConfigureAwait(false);
                 folder = library.GetVirtualFolders().FirstOrDefault(x => string.Equals(x.Name, section.Name, StringComparison.OrdinalIgnoreCase));
             }
             if (folder is null || !Guid.TryParse(folder.ItemId, out var id)) throw new InvalidOperationException($"Не удалось создать медиатеку «{section.Name}».");
+            if (library.GetItemById<CollectionFolder>(id) is { } collection)
+            {
+                var options = collection.GetLibraryOptions();
+                var before = System.Text.Json.JsonSerializer.Serialize(options);
+                ConfigureMetadata(options, section.Kind);
+                if (before != System.Text.Json.JsonSerializer.Serialize(options)) collection.UpdateLibraryOptions(options);
+            }
             ids.Add(section.Kind, id);
         }
         return ids;

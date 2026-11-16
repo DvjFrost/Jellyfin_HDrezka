@@ -21,6 +21,10 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         services.AddSingleton<SitemapDetailCoordinator>();
         services.AddScoped<SitemapDetailFilter>();
         services.AddScoped<PluginPackageMetadataFilter>();
+        services.AddScoped<DashboardConfigurationFilter>();
+        services.AddScoped<SeriesIdentifyFilter>();
+        services.Configure<MvcOptions>(options => options.Filters.AddService<SeriesIdentifyFilter>());
+        services.Configure<MvcOptions>(options => options.Filters.AddService<DashboardConfigurationFilter>());
         services.Configure<MvcOptions>(options => options.Filters.AddService<PluginPackageMetadataFilter>());
         services.Configure<MvcOptions>(options => options.Filters.AddService<SitemapDetailFilter>());
         var persistenceDescriptor = services.LastOrDefault(x => x.ServiceType == typeof(IItemPersistenceService));
