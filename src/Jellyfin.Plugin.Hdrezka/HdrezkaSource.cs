@@ -18,12 +18,22 @@ public sealed class HdrezkaSource(MirrorClient mirror)
         var html = await mirror.GetPageAsync(new Uri(mirror.CurrentMirror, path), token).ConfigureAwait(false);
         var detail = DetailParser.Parse(html, mirror.CurrentMirror) ?? throw new MirrorAccessException("Зеркало вернуло страницу без карточки видео.");
         var voices = VoiceParser.ParseFree(html, id).Where(v => v.ContentId.Length == 0 || v.ContentId == id).ToArray();
-        if (voices.Length > 0) _sessionListings[path] = new VoiceListing(detail.Title, voices);
         var doc = new HtmlDocument();
         doc.LoadHtml(html);
         var active = doc.DocumentNode.SelectSingleNode("//*[contains(concat(' ',normalize-space(@class),' '),' b-translator__item ') and contains(concat(' ',normalize-space(@class),' '),' active ')]");
         var activeId = active?.GetAttributeValue("data-translator_id", active.GetAttributeValue("data-translator-id", ""));
         var episodes = detail.HasEpisodes ? EpisodeParser.Parse(html) : [];
+        if (detail.HasEpisodes && voices.Length == 0 && VoiceParser.ParseSingleSeriesCandidate(html, id) is { } candidate)
+        {
+            var confirmedEpisodes = await FetchEpisodesAsync(id, candidate.Id, token, requireExplicitFree: true).ConfigureAwait(false);
+            if (confirmedEpisodes.Count > 0)
+            {
+                voices = [candidate];
+                episodes = confirmedEpisodes;
+                activeId = candidate.Id;
+            }
+        }
+        if (voices.Length > 0) _sessionListings[path] = new VoiceListing(detail.Title, voices);
         var episodeNames = detail.HasEpisodes ? EpisodeScheduleParser.Parse(html) : null;
         return new VideoDetailListing(detail, voices, activeId, episodes, episodeNames);
     }
@@ -47,6 +57,9 @@ public sealed class HdrezkaSource(MirrorClient mirror)
         doc.LoadHtml(html);
         var title = HtmlEntity.DeEntitize(doc.DocumentNode.SelectSingleNode("//h1")?.InnerText ?? "").Trim();
         var voices = VoiceParser.ParseFree(html, id).Where(v => v.ContentId.Length == 0 || v.ContentId == id).ToArray();
+        if (voices.Length == 0 && VoiceParser.ParseSingleSeriesCandidate(html, id) is { } candidate
+            && (await FetchEpisodesAsync(id, candidate.Id, token, requireExplicitFree: true).ConfigureAwait(false)).Count > 0)
+            voices = [candidate];
         var listing = new VoiceListing(title, voices);
         if (voices.Length > 0) _sessionListings[path] = listing;
         return listing;
@@ -115,12 +128,12 @@ public sealed class HdrezkaSource(MirrorClient mirror)
         return EpisodeScheduleParser.Apply(episodes, listing.EpisodeNames);
     }
 
-    private async Task<IReadOnlyList<Episode>> FetchEpisodesAsync(string id, string voiceId, CancellationToken token)
+    private async Task<IReadOnlyList<Episode>> FetchEpisodesAsync(string id, string voiceId, CancellationToken token, bool requireExplicitFree = false)
     {
         var form = new Dictionary<string,string> { ["id"] = id, ["translator_id"] = voiceId, ["action"] = "get_episodes" };
         var json = await mirror.PostFormAsync("ajax/get_cdn_series/", form, token).ConfigureAwait(false);
         using var doc = JsonDocument.Parse(json);
-        if (!Success(doc.RootElement) || IsPremium(doc.RootElement) || !doc.RootElement.TryGetProperty("episodes", out var episodes) || episodes.ValueKind != JsonValueKind.String) return Array.Empty<Episode>();
+        if (!Success(doc.RootElement) || IsPremium(doc.RootElement) || (requireExplicitFree && !IsExplicitlyFree(doc.RootElement)) || !doc.RootElement.TryGetProperty("episodes", out var episodes) || episodes.ValueKind != JsonValueKind.String) return Array.Empty<Episode>();
         return EpisodeParser.Parse(episodes.GetString() ?? "");
     }
 
@@ -152,6 +165,9 @@ public sealed class HdrezkaSource(MirrorClient mirror)
         return alternatives ? StreamParser.ParseAlternatives(url.GetString() ?? "") : StreamParser.Parse(url.GetString() ?? "");
     }
     private static bool Success(JsonElement root) => root.TryGetProperty("success", out var s) && s.ValueKind == JsonValueKind.True;
+    private static bool IsExplicitlyFree(JsonElement root) => root.TryGetProperty("premium_content", out var value) &&
+        (value.ValueKind == JsonValueKind.False || (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var n) && n == 0)
+         || (value.ValueKind == JsonValueKind.String && value.GetString() is "0" or "false"));
     private static bool IsPremium(JsonElement root)
     {
         if (!root.TryGetProperty("premium_content", out var value)) return false;

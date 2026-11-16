@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Model.Entities;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.Hdrezka;
@@ -48,7 +49,10 @@ public sealed class SitemapDetailCoordinator(LibraryMediaProvider media, ILibrar
             using var mirror = new MirrorClient(mirrorUri);
             var video = new SitemapVideo(id, "", null, kind, new Uri(mirror.CurrentMirror, path));
             var match = new TmdbMatch(id, TmdbMatchStatus.Uncertain, null, null, null, series ? "tv" : "movie");
-            var result = await SitemapDetailHydrator.HydrateAsync(root, video, match, new HdrezkaSource(mirror), token).ConfigureAwait(false);
+            var titleOwner = item is Video existingVideo && existingVideo.PrimaryVersionId is { } existingId
+                ? library.GetItemById(existingId) ?? item : item;
+            var keepTitle = titleOwner.IsLocked || titleOwner.LockedFields.Contains(MetadataField.Name) || !CatalogTitleRepair.IsSitePlaceholder(titleOwner.Name, path);
+            var result = await SitemapDetailHydrator.HydrateAsync(root, video, match, new HdrezkaSource(mirror), token, keepTitle ? titleOwner.Name : null).ConfigureAwait(false);
             if (result.StagedSeriesDirectory is not null && item is Video oldMovie)
             {
                 var replacement = await migration.ConvertAsync(root, oldMovie, result.StagedSeriesDirectory, id, token).ConfigureAwait(false);
@@ -81,9 +85,9 @@ public sealed class SitemapDetailCoordinator(LibraryMediaProvider media, ILibrar
             if (item is Folder folder)
             {
                 var options = new MediaBrowser.Controller.Providers.MetadataRefreshOptions(new MediaBrowser.Controller.Providers.DirectoryService(BaseItem.FileSystem))
-                { MetadataRefreshMode = MediaBrowser.Controller.Providers.MetadataRefreshMode.Default, EnableRemoteContentProbe = false, ForceSave = true };
+                { MetadataRefreshMode = MediaBrowser.Controller.Providers.MetadataRefreshMode.FullRefresh, ReplaceAllMetadata = false, EnableRemoteContentProbe = false, ForceSave = true };
                 await folder.RefreshMetadata(options, token).ConfigureAwait(false);
-                if (!string.IsNullOrWhiteSpace(hydratedName) && folder.Name != hydratedName)
+                if (!folder.IsLocked && !folder.LockedFields.Contains(MetadataField.Name) && CatalogTitleRepair.IsSitePlaceholder(folder.Name, path) && !string.IsNullOrWhiteSpace(hydratedName) && folder.Name != hydratedName)
                 {
                     folder.Name = hydratedName;
                     await library.UpdateItemAsync(folder, folder.GetParent(), ItemUpdateType.MetadataEdit, token).ConfigureAwait(false);
@@ -102,9 +106,9 @@ public sealed class SitemapDetailCoordinator(LibraryMediaProvider media, ILibrar
                         var existing = library.GetLocalAlternateVersionIds(primary).Select(library.GetItemById).OfType<Video>().Select(v => v.Path).Where(p => !string.IsNullOrEmpty(p));
                         primary.LocalAlternateVersions = MovieVersionPaths.Collect(Path.GetDirectoryName(primary.Path)!, updated.Id, updated.Voices, existing!).ToArray();
                         var options = new MediaBrowser.Controller.Providers.MetadataRefreshOptions(new MediaBrowser.Controller.Providers.DirectoryService(BaseItem.FileSystem))
-                        { MetadataRefreshMode = MediaBrowser.Controller.Providers.MetadataRefreshMode.Default, EnableRemoteContentProbe = false, ForceSave = true };
+                        { MetadataRefreshMode = MediaBrowser.Controller.Providers.MetadataRefreshMode.FullRefresh, ReplaceAllMetadata = false, EnableRemoteContentProbe = false, ForceSave = true };
                         await primary.RefreshMetadata(options, token).ConfigureAwait(false);
-                        if (!string.IsNullOrWhiteSpace(hydratedName) && primary.Name != hydratedName)
+                        if (!primary.IsLocked && !primary.LockedFields.Contains(MetadataField.Name) && CatalogTitleRepair.IsSitePlaceholder(primary.Name, path) && !string.IsNullOrWhiteSpace(hydratedName) && primary.Name != hydratedName)
                         {
                             primary.Name = hydratedName;
                             await library.UpdateItemAsync(primary, primary.GetParent(), ItemUpdateType.MetadataEdit, token).ConfigureAwait(false);

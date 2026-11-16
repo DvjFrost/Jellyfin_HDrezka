@@ -4,6 +4,14 @@ using Xunit;
 public sealed class VoiceParserTests
 {
     [Fact]
+    public void DoesNotInferSingleSeriesVoiceWhenPaidListExistsOrIdDiffers()
+    {
+        const string paid = "<li class='b-prem_translator' data-id='123' data-translator_id='473'>Paid</li><script>sof.tv.initCDNSeriesEvents(123, 473, 1, 1, false);</script>";
+        const string other = "<script>sof.tv.initCDNSeriesEvents(999, 473, 1, 1, false);</script>";
+        Assert.Null(VoiceParser.ParseSingleSeriesCandidate(paid, "123"));
+        Assert.Null(VoiceParser.ParseSingleSeriesCandidate(other, "123"));
+    }
+    [Fact]
     public void KeepsOnlyFreeVoicesInSiteOrder()
     {
         const string html = "<a class='b-translator__items b-prem_translator' data-id='88809' data-translator_id='111' title='Paid'></a><a class='b-translator__items' data-id='88809' data-translator_id='56' data-camrip='0' data-ads='1' data-director='0' title='Free'></a>";

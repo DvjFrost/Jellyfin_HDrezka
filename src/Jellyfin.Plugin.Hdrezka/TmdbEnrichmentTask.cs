@@ -80,10 +80,10 @@ public sealed class TmdbEnrichmentTask(IApplicationPaths paths, LibraryMediaProv
                 {
                     try
                     {
-                        // Default lets Jellyfin merge the changed local NFO into existing items.
-                        // FullRefresh without ReplaceAllMetadata keeps stale database values and
-                        // can then save those values back over the newly enriched NFO.
-                        var options = new MetadataRefreshOptions(new DirectoryService(BaseItem.FileSystem)) { MetadataRefreshMode = MetadataRefreshMode.Default, EnableRemoteContentProbe = false, ForceSave = true };
+                        // Jellyfin's NFO change monitor ignores changes within one minute of its
+                        // own last save. Run local providers even in that window while preserving
+                        // fields already present in Jellyfin.
+                        var options = new MetadataRefreshOptions(new DirectoryService(BaseItem.FileSystem)) { MetadataRefreshMode = MetadataRefreshMode.FullRefresh, ReplaceAllMetadata = false, EnableRemoteContentProbe = false, ForceSave = true };
                         await item.RefreshMetadata(options, ct).ConfigureAwait(false);
                         if (File.Exists(pending)) File.Delete(pending);
                     }

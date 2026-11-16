@@ -4,6 +4,51 @@ using Xunit;
 
 public sealed class HdrezkaSourceTests
 {
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, false)]
+    [InlineData(-1, false)]
+    public async Task SingleVoiceSeriesIsAvailableOnlyAfterFreeAccessIsConfirmed(int premium, bool expectedFree)
+    {
+        const string html = "<div class='b-post__title'><h1>Сериал</h1></div><table class='b-post__info'><tr><td><h2>В переводе</h2></td><td>RUDUB</td></tr></table><script>sof.tv.initCDNSeriesEvents(123, 473, 1, 1, false);</script><ul class='b-simple_episodes__list' id='simple-episodes-list-1'><li class='b-simple_episode__item' data-episode_id='1'>Серия 1</li></ul>";
+        const string episodes = "<ul class='b-simple_episodes__list' id='simple-episodes-list-1'><li class='b-simple_episode__item' data-episode_id='1'>Серия 1</li></ul>";
+        var handler = new Handler(async request => {
+            if (request.Method == HttpMethod.Get) return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(html) };
+            var body = await request.Content!.ReadAsStringAsync();
+            Assert.Contains("translator_id=473", body);
+            Assert.Contains("action=get_episodes", body);
+            var data = new Dictionary<string, object> { ["success"] = true, ["episodes"] = episodes };
+            if (premium >= 0) data["premium_content"] = premium;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(data)) };
+        });
+        using var http = new HttpClient(handler);
+        using var mirror = new MirrorClient(new Uri("https://single-series.test/"), http);
+        var source = new HdrezkaSource(mirror);
+        var listing = await source.DetailAndVoicesAsync("/series/test/123-show.html", CancellationToken.None);
+        if (expectedFree)
+        {
+            var voice = Assert.Single(listing.Voices);
+            Assert.Equal("473", voice.Id);
+            Assert.Equal("RUDUB", voice.Title);
+            Assert.Single(await source.EpisodesFromListingAsync("/series/test/123-show.html", listing, voice, CancellationToken.None));
+        }
+        else Assert.Empty(listing.Voices);
+        Assert.Equal(2, handler.Count);
+    }
+
+    [Fact]
+    public async Task SingleFreeSeriesVoiceIsAvailableToDownloads()
+    {
+        const string html = "<div class='b-post__title'><h1>Сериал</h1></div><script>sof.tv.initCDNSeriesEvents(123, 473, 1, 1, false);</script>";
+        const string episodes = "<ul class='b-simple_episodes__list' id='simple-episodes-list-1'><li class='b-simple_episode__item' data-episode_id='1'>Серия 1</li></ul>";
+        var handler = new Handler(request => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(request.Method == HttpMethod.Get ? html : System.Text.Json.JsonSerializer.Serialize(new { success = true, premium_content = 0, episodes })) }));
+        using var http = new HttpClient(handler);
+        using var mirror = new MirrorClient(new Uri("https://single-series-download.test/"), http);
+        var listing = await new HdrezkaSource(mirror).VoiceListingAsync("/series/test/123-show.html", CancellationToken.None);
+        Assert.Equal("473", Assert.Single(listing.Voices).Id);
+        Assert.Equal(2, handler.Count);
+    }
+
     [Fact]
     public async Task SelectedVoiceReturnsAllAlternativesWithoutExtraRequests()
     {

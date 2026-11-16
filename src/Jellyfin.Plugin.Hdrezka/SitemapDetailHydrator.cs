@@ -6,7 +6,7 @@ public sealed record SitemapHydrationResult(string? StagedSeriesDirectory);
 
 public static class SitemapDetailHydrator
 {
-    public static async Task<SitemapHydrationResult> HydrateAsync(string root, SitemapVideo video, TmdbMatch? match, HdrezkaSource source, CancellationToken token)
+    public static async Task<SitemapHydrationResult> HydrateAsync(string root, SitemapVideo video, TmdbMatch? match, HdrezkaSource source, CancellationToken token, string? preservedTitle = null)
     {
         var section = video.Kind switch { CatalogKind.Movie => "films", CatalogKind.Series => "series", CatalogKind.Anime => "animation", CatalogKind.Show => "show", _ => "cartoons" };
         var library = Path.Combine(root, section);
@@ -27,6 +27,7 @@ public static class SitemapDetailHydrator
             title = listing.Detail.Title;
             poster = listing.Detail.Poster ?? poster;
         }
+        if (!string.IsNullOrWhiteSpace(preservedTitle)) title = preservedTitle;
         var transition = !isSeries && listing.Detail.HasEpisodes && video.Kind is CatalogKind.Cartoon or CatalogKind.Anime or CatalogKind.Show;
         if (!isSeries && listing.Detail.HasEpisodes && !transition) throw new InvalidOperationException("A film was identified as a series.");
         if (transition) isSeries = true;

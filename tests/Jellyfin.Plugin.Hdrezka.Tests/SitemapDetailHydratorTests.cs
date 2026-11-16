@@ -6,6 +6,24 @@ using Xunit;
 public sealed class SitemapDetailHydratorTests
 {
     [Fact]
+    public async Task UnmatchedItemPreservesUserTitleWhenSiteMetadataIsReloaded()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "hdrezka-site-manual-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var video = new SitemapVideo("123", "placeholder", 2020, CatalogKind.Movie, new Uri("https://mirror.test/films/a/123-placeholder-2020.html"));
+            await SitemapLibraryWriter.WriteAsync(root, video, null, CancellationToken.None);
+            const string html = "<div class='b-post__title'><h1>Название сайта</h1></div><div class='b-post__description_text'>Описание</div>";
+            using var http = new HttpClient(new Handler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(html) }));
+            using var mirror = new MirrorClient(new Uri("https://mirror.test/"), http);
+            await SitemapDetailHydrator.HydrateAsync(root, video, null, new HdrezkaSource(mirror), CancellationToken.None, "Моё название");
+            var nfo = XDocument.Load(Path.Combine(root, "films", "HDrezka-123", "movie.nfo"));
+            Assert.Equal("Моё название", nfo.Root!.Element("title")?.Value);
+            Assert.Equal("Описание", nfo.Root.Element("plot")?.Value);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+    [Fact]
     public async Task SeriesFactsRemainAfterRefreshAndEpisodeStreamCanBeResolved()
     {
         var root = Path.Combine(Path.GetTempPath(), "hdrezka-series-facts-" + Guid.NewGuid().ToString("N"));

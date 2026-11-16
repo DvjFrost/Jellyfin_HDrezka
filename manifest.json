@@ -5,12 +5,12 @@
     "description": "Каталог фильмов и сериалов HDrezka с данными TMDB и бесплатными озвучками.",
     "versions": [
       {
-        "timestamp": "2026-11-16T00:00:00Z",
+        "timestamp": "2026-11-17T00:00:00Z",
         "targetAbi": "12.4.0.0",
-        "changelog": "Исправлены конфликты параллельной записи NFO при обновлении и редактировании карточек HDrezka.",
-        "checksum": "144a8f3c041c51da2154bb25a2204e42",
-        "sourceUrl": "https://raw.githubusercontent.com/DvjFrost/Jellyfin_HDrezka/main/packages/HDrezka-v0.3.2.zip",
-        "version": "0.3.2.0"
+        "changelog": "Восстановлена загрузка карточек после ошибки 0.3.2; исправлены чтение NFO и сериалы с одной бесплатной озвучкой.",
+        "checksum": "be0981fb7ea8842136dfe17283b600da",
+        "sourceUrl": "https://raw.githubusercontent.com/DvjFrost/Jellyfin_HDrezka/main/packages/HDrezka-v0.3.3.zip",
+        "version": "0.3.3.0"
       },
       {
         "timestamp": "2026-11-16T00:00:00Z",

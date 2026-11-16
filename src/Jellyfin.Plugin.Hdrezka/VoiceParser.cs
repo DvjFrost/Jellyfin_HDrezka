@@ -7,6 +7,21 @@ public sealed record FreeVoice(string Id, string ContentId, string Title, string
 
 public static class VoiceParser
 {
+    public static FreeVoice? ParseSingleSeriesCandidate(string html, string? expectedContentId)
+    {
+        if (string.IsNullOrEmpty(expectedContentId) || expectedContentId.Length > 16 || !expectedContentId.All(char.IsAsciiDigit)) return null;
+        var document = new HtmlDocument(); document.LoadHtml(html);
+        if (document.DocumentNode.SelectSingleNode("//*[@data-translator_id or @data-translator-id]") is not null) return null;
+        const string pattern = @"(?:sof\.tv\.)?initCDNSeriesEvents\s*\(\s*(?<content>[0-9]{1,16})\s*,\s*(?<voice>[0-9]{1,8})\s*,\s*[0-9]{1,4}\s*,\s*[0-9]{1,4}\s*,";
+        foreach (var script in document.DocumentNode.SelectNodes("//script") ?? Enumerable.Empty<HtmlNode>())
+        {
+            var match = Regex.Match(script.InnerText, pattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+            if (match.Success && match.Groups["content"].Value == expectedContentId)
+                return new FreeVoice(match.Groups["voice"].Value, expectedContentId, SingleTranslationTitle(document) ?? "Доступная озвучка", "0", "0", "0");
+        }
+        return null;
+    }
+
     public static IReadOnlyList<FreeVoice> ParseFree(string html, string? expectedContentId = null)
     {
         var document = new HtmlDocument();
