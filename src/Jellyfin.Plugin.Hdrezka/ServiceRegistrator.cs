@@ -5,6 +5,7 @@ using MediaBrowser.Controller.Library;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using MediaBrowser.Controller.Persistence;
+using MediaBrowser.Controller.Providers;
 using MediaBrowser.Common.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -29,6 +30,19 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         services.Configure<MvcOptions>(options => options.Filters.AddService<DashboardConfigurationFilter>());
         services.Configure<MvcOptions>(options => options.Filters.AddService<PluginPackageMetadataFilter>());
         services.Configure<MvcOptions>(options => options.Filters.AddService<SitemapDetailFilter>());
+        var providerDescriptor = services.LastOrDefault(x => x.ServiceType == typeof(IProviderManager));
+        if (providerDescriptor is not null)
+        {
+            services.Remove(providerDescriptor);
+            services.AddSingleton<IProviderManager>(sp =>
+            {
+                var inner = (IProviderManager)(providerDescriptor.ImplementationInstance ?? providerDescriptor.ImplementationFactory?.Invoke(sp)
+                    ?? ActivatorUtilities.CreateInstance(sp, providerDescriptor.ImplementationType!));
+                var proxy = System.Reflection.DispatchProxy.Create<IProviderManager, MetadataProviderProxy>();
+                ((MetadataProviderProxy)(object)proxy).Inner = inner;
+                return proxy;
+            });
+        }
         var persistenceDescriptor = services.LastOrDefault(x => x.ServiceType == typeof(IItemPersistenceService));
         if (persistenceDescriptor is not null)
         {

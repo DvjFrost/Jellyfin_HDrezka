@@ -36,7 +36,7 @@
 
 ## Ручная установка
 
-Скачайте [HDrezka-v0.3.1.zip](https://raw.githubusercontent.com/DvjFrost/Jellyfin_HDrezka/main/packages/HDrezka-v0.3.1.zip). Остановите Jellyfin, распакуйте содержимое архива в отдельную папку `plugins/HDrezka`, затем запустите сервер. Все файлы архива должны лежать непосредственно в этой папке.
+Скачайте [HDrezka-v0.3.2.zip](https://raw.githubusercontent.com/DvjFrost/Jellyfin_HDrezka/main/packages/HDrezka-v0.3.2.zip). Остановите Jellyfin, распакуйте содержимое архива в отдельную папку `plugins/HDrezka`, затем запустите сервер. Все файлы архива должны лежать непосредственно в этой папке.
 
 ## Настройки и работа
 

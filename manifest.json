@@ -7,6 +7,14 @@
       {
         "timestamp": "2026-11-16T00:00:00Z",
         "targetAbi": "12.4.0.0",
+        "changelog": "Исправлены конфликты параллельной записи NFO при обновлении и редактировании карточек HDrezka.",
+        "checksum": "144a8f3c041c51da2154bb25a2204e42",
+        "sourceUrl": "https://raw.githubusercontent.com/DvjFrost/Jellyfin_HDrezka/main/packages/HDrezka-v0.3.2.zip",
+        "version": "0.3.2.0"
+      },
+      {
+        "timestamp": "2026-11-16T00:00:00Z",
+        "targetAbi": "12.4.0.0",
         "changelog": "Постер сериала вместо пустой карточки в разделе продолжения просмотра, если у эпизода нет кадра.",
         "checksum": "e6837f7a52e72014f060ca58beee5a10",
         "sourceUrl": "https://raw.githubusercontent.com/DvjFrost/Jellyfin_HDrezka/main/packages/HDrezka-v0.3.1.zip",
