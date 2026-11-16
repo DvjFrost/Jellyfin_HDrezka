@@ -23,6 +23,8 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         services.AddScoped<PluginPackageMetadataFilter>();
         services.AddScoped<DashboardConfigurationFilter>();
         services.AddScoped<SeriesIdentifyFilter>();
+        services.AddScoped<ResumePosterFallbackFilter>();
+        services.Configure<MvcOptions>(options => options.Filters.AddService<ResumePosterFallbackFilter>());
         services.Configure<MvcOptions>(options => options.Filters.AddService<SeriesIdentifyFilter>());
         services.Configure<MvcOptions>(options => options.Filters.AddService<DashboardConfigurationFilter>());
         services.Configure<MvcOptions>(options => options.Filters.AddService<PluginPackageMetadataFilter>());
