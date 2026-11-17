@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
@@ -20,6 +21,7 @@ public sealed class MirrorClient : IDisposable
     private readonly bool _ownsClient;
     private readonly bool _sharedClient;
     private readonly TimeSpan _requestInterval;
+    private readonly ILogger? _logger;
     private static readonly SemaphoreSlim RequestGate = new(1, 1);
     private static long _lastRequestTimestamp;
     private sealed class ChallengeState { public readonly SemaphoreSlim Gate = new(1, 1); public long Generation; }
@@ -29,11 +31,12 @@ public sealed class MirrorClient : IDisposable
     private ChallengeState Challenge => Challenges.GetOrAdd(_mirror.GetLeftPart(UriPartial.Authority), static _ => new ChallengeState());
     private Uri _effective;
 
-    public MirrorClient(Uri mirror, HttpClient? client = null, TimeSpan? requestInterval = null)
+    public MirrorClient(Uri mirror, HttpClient? client = null, TimeSpan? requestInterval = null, ILogger? logger = null)
     {
         if (!mirror.IsAbsoluteUri || mirror.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(mirror.UserInfo)) throw new ArgumentException("Mirror must use HTTPS", nameof(mirror));
         _mirror = new Uri(mirror.GetLeftPart(UriPartial.Authority) + "/");
         _requestInterval = requestInterval ?? TimeSpan.Zero;
+        _logger = logger;
         if (_requestInterval < TimeSpan.Zero || _requestInterval > TimeSpan.FromMinutes(1)) throw new ArgumentOutOfRangeException(nameof(requestInterval));
         _effective = _mirror;
         if (client is null)
@@ -58,6 +61,7 @@ public sealed class MirrorClient : IDisposable
         var page = await SendAsync(HttpMethod.Get, uri, null, cancellationToken, maxLength: maxLength).ConfigureAwait(false);
         _effective = new Uri(page.Url.GetLeftPart(UriPartial.Authority) + "/");
         if (!page.Body.Contains("anubis_challenge", StringComparison.OrdinalIgnoreCase)) return EnsureSuccess(page);
+        _logger?.LogInformation("HDrezka Anubis challenge detected for page request");
         await state.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -68,10 +72,17 @@ public sealed class MirrorClient : IDisposable
             }
             var passed = await PassAnubisAsync(page.Body, page.Url, cancellationToken, maxLength).ConfigureAwait(false);
             Interlocked.Increment(ref state.Generation);
-            if (passed.Url.AbsolutePath == page.Url.AbsolutePath && !ContainsChallenge(passed.Body)) return EnsureSuccess(passed);
+            if (passed.Url.AbsolutePath == page.Url.AbsolutePath && !ContainsChallenge(passed.Body))
+            {
+                var result = EnsureSuccess(passed);
+                _logger?.LogInformation("HDrezka Anubis challenge passed for page request");
+                return result;
+            }
             var retry = await SendAsync(HttpMethod.Get, page.Url, null, cancellationToken, maxLength: maxLength).ConfigureAwait(false);
             if (ContainsChallenge(retry.Body)) throw new MirrorAccessException("Зеркало повторно запросило проверку Anubis.");
-            return EnsureSuccess(retry);
+            var retried = EnsureSuccess(retry);
+            _logger?.LogInformation("HDrezka Anubis challenge passed for page request");
+            return retried;
         }
         finally { state.Gate.Release(); }
     }
@@ -84,6 +95,7 @@ public sealed class MirrorClient : IDisposable
         var response = await SendAsync(HttpMethod.Post, uri, data, cancellationToken).ConfigureAwait(false);
         if (ContainsChallenge(response.Body))
         {
+            _logger?.LogInformation("HDrezka Anubis challenge detected for player request");
             await state.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
@@ -95,6 +107,8 @@ public sealed class MirrorClient : IDisposable
                     Interlocked.Increment(ref state.Generation);
                     response = await SendAsync(HttpMethod.Post, uri, data, cancellationToken).ConfigureAwait(false);
                     if (ContainsChallenge(response.Body)) throw new MirrorAccessException("Зеркало повторно запросило проверку Anubis.");
+                    _ = EnsureSuccess(response);
+                    _logger?.LogInformation("HDrezka Anubis challenge passed for player request");
                 }
             }
             finally { state.Gate.Release(); }

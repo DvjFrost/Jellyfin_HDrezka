@@ -7,6 +7,14 @@
       {
         "timestamp": "2026-11-17T00:00:00Z",
         "targetAbi": "12.4.0.0",
+        "changelog": "Исправлены конфликты одновременной записи NFO; добавлена диагностика проверки Anubis.",
+        "checksum": "3bd9a7e2ae0bd0c91842831d2077e625",
+        "sourceUrl": "https://raw.githubusercontent.com/DvjFrost/Jellyfin_HDrezka/main/packages/HDrezka-v0.3.5.zip",
+        "version": "0.3.5.0"
+      },
+      {
+        "timestamp": "2026-11-17T00:00:00Z",
+        "targetAbi": "12.4.0.0",
         "changelog": "Фильмы из нескольких частей: воспроизведение, продолжение и скачивание; исправлена подстановка данных и постеров.",
         "checksum": "993fec3e749569326e97253d50d9c2a9",
         "sourceUrl": "https://raw.githubusercontent.com/DvjFrost/Jellyfin_HDrezka/main/packages/HDrezka-v0.3.4.zip",

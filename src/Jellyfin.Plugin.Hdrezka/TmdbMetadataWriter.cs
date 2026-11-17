@@ -7,7 +7,7 @@ public static class TmdbMetadataWriter
 {
     public static async Task EnrichAsync(string path, int tmdbId, bool series, TmdbClient client, CancellationToken token)
     {
-        var document = XDocument.Load(path);
+        var document = await MetadataFileLock.ReadAsync(path, () => XDocument.Load(path), token).ConfigureAwait(false);
         var storedId = document.Root?.Element("tmdbid")?.Value;
         if (!int.TryParse(storedId, out var id) || id != tmdbId) throw new InvalidOperationException("TMDB identifier is missing or differs from the confirmed match.");
         if (string.Equals(document.Root?.Element("lockdata")?.Value, "true", StringComparison.OrdinalIgnoreCase)) return;

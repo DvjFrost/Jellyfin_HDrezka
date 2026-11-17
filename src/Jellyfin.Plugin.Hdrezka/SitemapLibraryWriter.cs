@@ -39,7 +39,7 @@ public static class SitemapLibraryWriter
         {
             try
             {
-                var saved = XDocument.Load(nfo).Root;
+                var saved = (await MetadataFileLock.ReadAsync(nfo, () => XDocument.Load(nfo), token).ConfigureAwait(false)).Root;
                 overview = saved?.Element("plot")?.Value ?? "";
                 if (keepSiteMetadata || keepTmdbMetadata || keepExistingMetadata)
                 {

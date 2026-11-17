@@ -47,7 +47,7 @@ public sealed class SitemapDetailCoordinator(LibraryMediaProvider media, ILibrar
         {
             if (_fresh.TryGetValue(id, out until) && until > DateTime.UtcNow) return SeriesMigration.FindReplacement(root, item.Id);
             var mirrorUri = new Uri(Plugin.Instance?.Configuration.MirrorUrl ?? "https://rezka-tv.org/");
-            using var mirror = new MirrorClient(mirrorUri);
+            using var mirror = new MirrorClient(mirrorUri, logger: logger);
             var video = new SitemapVideo(id, "", null, kind, new Uri(mirror.CurrentMirror, path));
             var match = new TmdbMatch(id, TmdbMatchStatus.Uncertain, null, null, null, series ? "tv" : "movie");
             var titleOwner = item is Video existingVideo && existingVideo.PrimaryVersionId is { } existingId
@@ -69,7 +69,7 @@ public sealed class SitemapDetailCoordinator(LibraryMediaProvider media, ILibrar
             {
                 try
                 {
-                    var nfo = System.Xml.Linq.XDocument.Load(nfoPath);
+                    var nfo = await MetadataFileLock.ReadAsync(nfoPath, () => System.Xml.Linq.XDocument.Load(nfoPath), token).ConfigureAwait(false);
                     var tmdbIdText = nfo.Root?.Element("tmdbid")?.Value;
                     var marker = Path.Combine(Path.GetDirectoryName(nfoPath)!, "hdrezka-tmdb-details.txt");
                     if (int.TryParse(tmdbIdText, out var tmdbId) && tmdbId > 0 && (!File.Exists(marker) || (await File.ReadAllTextAsync(marker, token).ConfigureAwait(false)).Trim() != tmdbIdText))
@@ -82,7 +82,7 @@ public sealed class SitemapDetailCoordinator(LibraryMediaProvider media, ILibrar
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 { logger.LogWarning("Could not enrich pilot item from TMDB: {ErrorType}", ex.GetType().Name); }
             }
-            var hydratedName = System.Xml.Linq.XDocument.Load(nfoPath).Root?.Element("title")?.Value;
+            var hydratedName = await MetadataFileLock.ReadAsync(nfoPath, () => System.Xml.Linq.XDocument.Load(nfoPath).Root?.Element("title")?.Value, token).ConfigureAwait(false);
             if (item is Folder folder)
             {
                 var options = new MediaBrowser.Controller.Providers.MetadataRefreshOptions(new MediaBrowser.Controller.Providers.DirectoryService(BaseItem.FileSystem))
@@ -143,7 +143,7 @@ public sealed class SitemapDetailCoordinator(LibraryMediaProvider media, ILibrar
         }
         catch (MirrorAccessException ex)
         {
-            logger.LogWarning("Could not load HDrezka item details: mirror HTTP {Status}", ex.StatusCode);
+            logger.LogWarning("Could not load HDrezka item details: {Reason}; mirror HTTP {Status}", ex.Message, ex.StatusCode);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

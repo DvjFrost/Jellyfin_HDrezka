@@ -34,24 +34,27 @@ public static class SeriesLibraryWriter
             var record = new LibraryEpisodeRecord(id, entry.Url.AbsolutePath, group.Key.Season, group.Key.Number, versions, useMoviePlayer);
             await MovieLibraryWriter.AtomicWriteAsync(Path.Combine(seasonDir, baseName + ".hdrezka.json"), JsonSerializer.Serialize(record), token).ConfigureAwait(false);
             var episodeNfoPath = Path.Combine(seasonDir, baseName + ".nfo");
-            XDocument? episodeNfo = null;
-            var writeNfo = true;
-            if (File.Exists(episodeNfoPath))
+            await MetadataFileLock.RunAsync(episodeNfoPath, async () =>
             {
-                try { episodeNfo = XDocument.Load(episodeNfoPath); }
-                catch (System.Xml.XmlException) { writeNfo = false; }
-                if (episodeNfo?.Root?.Name != "episodedetails") writeNfo = false;
-            }
-            if (writeNfo)
-            {
-                var existingTitle = episodeNfo?.Root?.Element("title")?.Value;
-                var selectedTitle = EpisodeTitleSelection.Choose(existingTitle, group.First().Episode.Title, number);
-                episodeNfo ??= new XDocument(new XElement("episodedetails", new XElement("season", season), new XElement("episode", number)));
-                var titleElement = episodeNfo.Root!.Element("title");
-                if (titleElement is null) episodeNfo.Root.AddFirst(new XElement("title", selectedTitle));
-                else titleElement.Value = selectedTitle;
-                await MovieLibraryWriter.AtomicWriteAsync(episodeNfoPath, episodeNfo.ToString(), token).ConfigureAwait(false);
-            }
+                XDocument? episodeNfo = null;
+                var writeNfo = true;
+                if (File.Exists(episodeNfoPath))
+                {
+                    try { episodeNfo = XDocument.Load(episodeNfoPath); }
+                    catch (System.Xml.XmlException) { writeNfo = false; }
+                    if (episodeNfo?.Root?.Name != "episodedetails") writeNfo = false;
+                }
+                if (writeNfo)
+                {
+                    var existingTitle = episodeNfo?.Root?.Element("title")?.Value;
+                    var selectedTitle = EpisodeTitleSelection.Choose(existingTitle, group.First().Episode.Title, number);
+                    episodeNfo ??= new XDocument(new XElement("episodedetails", new XElement("season", season), new XElement("episode", number)));
+                    var titleElement = episodeNfo.Root!.Element("title");
+                    if (titleElement is null) episodeNfo.Root.AddFirst(new XElement("title", selectedTitle));
+                    else titleElement.Value = selectedTitle;
+                    await MovieLibraryWriter.AtomicWriteAsync(episodeNfoPath, episodeNfo.ToString(), token).ConfigureAwait(false);
+                }
+            }, token).ConfigureAwait(false);
             var primary = Path.Combine(seasonDir, baseName + ".strm");
             if (!File.Exists(primary)) await MovieLibraryWriter.AtomicWriteAsync(primary, MovieLibraryWriter.Placeholder, token).ConfigureAwait(false);
             foreach (var voice in versions.Skip(1))

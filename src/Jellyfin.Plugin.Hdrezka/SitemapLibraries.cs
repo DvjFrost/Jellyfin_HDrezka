@@ -7,11 +7,24 @@ namespace Jellyfin.Plugin.Hdrezka;
 
 public static class SitemapLibraries
 {
+    public static CatalogKind? OwnedKind(string name, IReadOnlyList<string> locations, string root)
+    {
+        var section = name switch { "Фильмы HDrezka" => "films", "Сериалы HDrezka" => "series", _ => null };
+        if (section is null || locations.Count != 1) return null;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(locations[0])), Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(root, section))), comparison)
+            ? section == "films" ? CatalogKind.Movie : CatalogKind.Series : null;
+    }
+
+    public static void ConfigureNfoSaver(LibraryOptions options)
+        => options.MetadataSavers = (options.MetadataSavers ?? []).Where(x => !string.Equals(x, "Nfo", StringComparison.OrdinalIgnoreCase))
+            .Append(HdrezkaNfoSaver.SaverName).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
     public static void ConfigureMetadata(LibraryOptions options, CatalogKind kind)
     {
         options.EnableInternetProviders = true;
         options.SaveLocalMetadata = true;
-        options.MetadataSavers = (options.MetadataSavers ?? []).Append("Nfo").Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        ConfigureNfoSaver(options);
         var types = (options.TypeOptions ?? []).ToList();
         TypeOptions For(string type)
         {

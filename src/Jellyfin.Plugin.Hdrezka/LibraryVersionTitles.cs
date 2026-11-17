@@ -46,7 +46,7 @@ public static class LibraryVersionTitles
             var nfoPath = Path.ChangeExtension(primary.Path, ".nfo");
             if (File.Exists(nfoPath))
             {
-                var title = XDocument.Load(nfoPath).Root?.Element("title")?.Value;
+                var title = await MetadataFileLock.ReadAsync(nfoPath, () => XDocument.Load(nfoPath).Root?.Element("title")?.Value, token).ConfigureAwait(false);
                 if (int.TryParse(record.Number, out var number) && EpisodeTitleSelection.ShouldRepair(primary.Name, primary.Path, title, number,
                     primary.IsLocked || primary.LockedFields.Contains(MetadataField.Name))) { primary.Name = title!; changed = true; }
             }

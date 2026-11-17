@@ -14,7 +14,7 @@ public static class SitemapDetailHydrator
         var isSeries = video.Kind == CatalogKind.Series || (video.Kind is CatalogKind.Cartoon or CatalogKind.Anime or CatalogKind.Show && match?.MediaType == "tv");
         var nfoPath = Path.Combine(dir, isSeries ? "tvshow.nfo" : "movie.nfo");
         if (!File.Exists(nfoPath)) throw new InvalidOperationException("Catalog item must be indexed first.");
-        var nfo = XDocument.Load(nfoPath);
+        var nfo = await MetadataFileLock.ReadAsync(nfoPath, () => XDocument.Load(nfoPath), token).ConfigureAwait(false);
         var title = nfo.Root?.Element("title")?.Value;
         if (string.IsNullOrWhiteSpace(title)) throw new InvalidDataException("Catalog item has no title.");
         var thumb = nfo.Root?.Element("thumb")?.Value;

@@ -1,10 +1,47 @@
 using System.Net;
 using System.Text;
 using Jellyfin.Plugin.Hdrezka;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 public sealed class MirrorClientTests
 {
+    [Fact]
+    public async Task LogsChallengeOutcomeWithoutSecrets()
+    {
+        var handler = new SequenceHandler(
+            _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Challenge) },
+            _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") },
+            _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") });
+        using var client = new HttpClient(handler);
+        var log = new RecordingLogger();
+        using var mirror = new MirrorClient(new Uri("https://anubis-log.example/"), client, logger: log);
+        Assert.Equal("ok", await mirror.GetPageAsync(new Uri("https://anubis-log.example/item"), CancellationToken.None));
+        Assert.Contains(log.Messages, x => x.Contains("Anubis") && x.Contains("detected"));
+        Assert.Contains(log.Messages, x => x.Contains("Anubis") && x.Contains("passed"));
+        Assert.DoesNotContain(log.Messages, x => x.Contains("hunter") || x.Contains("abc") || x.Contains("nonce"));
+    }
+
+    [Fact]
+    public async Task FailedChallengeIsNotLoggedAsPassed()
+    {
+        var handler = new SequenceHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Challenge.Replace("fast", "unsupported")) });
+        using var client = new HttpClient(handler);
+        var log = new RecordingLogger();
+        using var mirror = new MirrorClient(new Uri("https://anubis-fail-log.example/"), client, logger: log);
+        await Assert.ThrowsAsync<MirrorAccessException>(() => mirror.GetPageAsync(new Uri("https://anubis-fail-log.example/item"), CancellationToken.None));
+        Assert.Contains(log.Messages, x => x.Contains("detected"));
+        Assert.DoesNotContain(log.Messages, x => x.Contains("passed"));
+    }
+
+    private sealed class RecordingLogger : ILogger
+    {
+        public List<string> Messages { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+    }
+
     [Fact]
     public async Task Http500StopsFurtherRequestsAcrossClientsForSameMirror()
     {
