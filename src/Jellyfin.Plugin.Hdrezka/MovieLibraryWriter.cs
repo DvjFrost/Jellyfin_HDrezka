@@ -57,6 +57,20 @@ public static class MovieLibraryWriter
         Set("title", detail.Title); Set("plot", detail.Overview);
         Set("year", YearElement(entry.Description)?.Value); Set("thumb", entry.Poster?.AbsoluteUri);
         Set("tagline", detail.Tagline);
+        var lockedFields = (root.Element("lockedfields")?.Value ?? "").Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        void FillMissing(string name, string? value, string? lockedField = null)
+        {
+            if (string.IsNullOrWhiteSpace(value) || string.Equals(root.Element("lockdata")?.Value, "true", StringComparison.OrdinalIgnoreCase) ||
+                (lockedField is not null && lockedFields.Contains(lockedField))) return;
+            var current = root.Element(name);
+            if (current is null) root.Add(new XElement(name, value));
+            else if (string.IsNullOrWhiteSpace(current.Value)) current.Value = value;
+        }
+        FillMissing("originaltitle", detail.OriginalTitle, "Name");
+        FillMissing("premiered", detail.ReleaseDate);
+        FillMissing("mpaa", detail.AgeRating, "OfficialRating");
+        if (!root.Elements("uniqueid").Any(x => string.Equals((string?)x.Attribute("type"), "imdb", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(x.Value))
+            && string.IsNullOrWhiteSpace(root.Element("imdb_id")?.Value)) FillMissing("imdbid", detail.ImdbId);
         if (!root.Elements("genre").Any()) foreach (var genre in detail.Genres.Where(x => !string.IsNullOrWhiteSpace(x))) root.Add(new XElement("genre", genre));
         if (!root.Elements("director").Any()) foreach (var director in detail.Directors.Where(x => !string.IsNullOrWhiteSpace(x))) root.Add(new XElement("director", director));
         if (!root.Elements("actor").Any()) foreach (var actor in detail.Actors.Where(x => !string.IsNullOrWhiteSpace(x))) root.Add(new XElement("actor", new XElement("name", actor)));

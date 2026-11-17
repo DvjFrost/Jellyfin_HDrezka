@@ -1,5 +1,7 @@
 using HtmlAgilityPack;
 using System.Text;
+using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace Jellyfin.Plugin.Hdrezka;
 
@@ -10,6 +12,10 @@ public sealed record CatalogDetail(string Title, string Overview, bool HasEpisod
     public IReadOnlyList<string> Directors { get; init; } = [];
     public string? Tagline { get; init; }
     public double? ImdbRating { get; init; }
+    public string? OriginalTitle { get; init; }
+    public string? ReleaseDate { get; init; }
+    public string? ImdbId { get; init; }
+    public string? AgeRating { get; init; }
 }
 
 public static class DetailParser
@@ -42,7 +48,41 @@ public static class DetailParser
             .Select(row => Text(row.SelectNodes("./td")?.LastOrDefault())).FirstOrDefault();
         var imdb = Text(doc.DocumentNode.SelectSingleNode("//*[contains(concat(' ',normalize-space(@class),' '),' b-post__info_rates ') and contains(concat(' ',normalize-space(@class),' '),' imdb ')]//*[contains(concat(' ',normalize-space(@class),' '),' bold ')]"));
         double? rating = double.TryParse(imdb.Replace(',', '.'), System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture, out var parsed) && parsed is >= 0 and <= 10 ? parsed : null;
-        return new CatalogDetail(title, overview, hasEpisodes, poster) { Genres = genres, Actors = actors, Directors = directors, Tagline = tagline, ImdbRating = rating };
+        var original = Text(doc.DocumentNode.SelectSingleNode("//*[contains(concat(' ',normalize-space(@class),' '),' b-post__origtitle ')]"));
+        var originalTitle = original.Split(" / ", StringSplitOptions.None)[0].Trim();
+        var rows = doc.DocumentNode.SelectNodes("//table[contains(concat(' ',normalize-space(@class),' '),' b-post__info ')]//tr") ?? Enumerable.Empty<HtmlNode>();
+        string RowValue(string label) => rows.Where(row => Text(row.SelectSingleNode(".//h2")).TrimEnd(':', ' ').Equals(label, StringComparison.OrdinalIgnoreCase))
+            .Select(row => Text(row.SelectNodes("./td")?.LastOrDefault())).FirstOrDefault() ?? "";
+        var dateMatch = Regex.Match(RowValue("Дата выхода"), @"\b(\d{1,2})\s+([а-яё]+)\s+((?:18|19|20)\d{2})\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+        string? releaseDate = null;
+        if (dateMatch.Success && DateOnly.TryParseExact(dateMatch.Groups[1].Value + " " + dateMatch.Groups[2].Value + " " + dateMatch.Groups[3].Value, "d MMMM yyyy", CultureInfo.GetCultureInfo("ru-RU"), DateTimeStyles.None, out var parsedDate))
+            releaseDate = parsedDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var age = Regex.Match(RowValue("Возраст"), @"(?<!\d)(0|6|12|16|18)\s*\+", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+        var imdbLink = doc.DocumentNode.SelectSingleNode("//*[contains(concat(' ',normalize-space(@class),' '),' b-post__info_rates ') and contains(concat(' ',normalize-space(@class),' '),' imdb ')]//a")?.GetAttributeValue("href", "");
+        var imdbId = ParseImdbId(imdbLink, mirror);
+        return new CatalogDetail(title, overview, hasEpisodes, poster) { Genres = genres, Actors = actors, Directors = directors, Tagline = tagline, ImdbRating = rating,
+            OriginalTitle = originalTitle.Length > 0 ? originalTitle : null, ReleaseDate = releaseDate, ImdbId = imdbId, AgeRating = age.Success ? age.Groups[1].Value + "+" : null };
+    }
+
+    private static string? ParseImdbId(string? href, Uri? mirror)
+    {
+        if (string.IsNullOrWhiteSpace(href) || href.Length > 4096) return null;
+        try
+        {
+            var value = href;
+            if (Uri.TryCreate(value, UriKind.Absolute, out var redirect) && mirror is not null && redirect.Host.Equals(mirror.Host, StringComparison.OrdinalIgnoreCase)) value = redirect.PathAndQuery;
+            if (value.StartsWith("/help/", StringComparison.OrdinalIgnoreCase))
+            {
+                var encoded = value[6..].Trim('/');
+                if (encoded.Length > 2048 || encoded.Contains('/')) return null;
+                value = Uri.UnescapeDataString(Encoding.UTF8.GetString(Convert.FromBase64String(encoded)));
+            }
+            if (!Uri.TryCreate(value, UriKind.Absolute, out var target) || target.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(target.UserInfo) || target.Port != 443 ||
+                !(target.Host.Equals("imdb.com", StringComparison.OrdinalIgnoreCase) || target.Host.Equals("www.imdb.com", StringComparison.OrdinalIgnoreCase))) return null;
+            var match = Regex.Match(target.AbsolutePath, @"^/title/(tt\d{5,12})(?:/|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+            return match.Success ? match.Groups[1].Value.ToLowerInvariant() : null;
+        }
+        catch (Exception ex) when (ex is FormatException or UriFormatException or ArgumentException) { return null; }
     }
 
     private static string Text(HtmlNode? node)
