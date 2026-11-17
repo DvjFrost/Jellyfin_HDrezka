@@ -34,7 +34,8 @@ public sealed class SitemapDetailCoordinator(LibraryMediaProvider media, ILibrar
         {
             if (item is not Video) return null;
             var record = media.Record(item);
-            if (record?.Season is not null) return null;
+            if (record?.Season is not null && !record.MultipartMovie) return null;
+            if (record?.MultipartMovie == true && Path.GetFileName(Path.GetDirectoryName(item.Path)) == ".hdrezka-parts") return null;
             id = record?.Id;
             path = record?.Path;
         }
@@ -105,9 +106,30 @@ public sealed class SitemapDetailCoordinator(LibraryMediaProvider media, ILibrar
                     {
                         var existing = library.GetLocalAlternateVersionIds(primary).Select(library.GetItemById).OfType<Video>().Select(v => v.Path).Where(p => !string.IsNullOrEmpty(p));
                         primary.LocalAlternateVersions = MovieVersionPaths.Collect(Path.GetDirectoryName(primary.Path)!, updated.Id, updated.Voices, existing!).ToArray();
+                        if (updated.MultipartMovie)
+                        {
+                            var partDir = Path.Combine(Path.GetDirectoryName(primary.Path)!, ".hdrezka-parts");
+                            var partFile = Path.Combine(Path.GetDirectoryName(primary.Path)!, "hdrezka-parts.json");
+                            var parts = System.Text.Json.JsonSerializer.Deserialize<MultipartMoviePart[]>(await File.ReadAllTextAsync(partFile, token).ConfigureAwait(false)) ?? [];
+                            primary.AdditionalParts = Enumerable.Range(2, Math.Max(0, parts.Length - 1))
+                                .Select(i => Path.Combine(partDir, LibraryPath.TitleDirectory(updated.Id) + " - pt" + i.ToString("D4", System.Globalization.CultureInfo.InvariantCulture) + ".strm"))
+                                .Where(File.Exists).ToArray();
+                        }
                         var options = new MediaBrowser.Controller.Providers.MetadataRefreshOptions(new MediaBrowser.Controller.Providers.DirectoryService(BaseItem.FileSystem))
                         { MetadataRefreshMode = MediaBrowser.Controller.Providers.MetadataRefreshMode.FullRefresh, ReplaceAllMetadata = false, EnableRemoteContentProbe = false, ForceSave = true };
                         await primary.RefreshMetadata(options, token).ConfigureAwait(false);
+                        if (updated.MultipartMovie)
+                        {
+                            for (var index = 0; index < primary.AdditionalParts.Length; index++)
+                            {
+                                var partId = library.GetNewItemId(primary.AdditionalParts[index], typeof(Video));
+                                if (library.GetItemById<Video>(partId) is not { } part) continue;
+                                var partName = hydratedName + " — Часть " + (index + 2).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                                if (part.Name == partName) continue;
+                                part.Name = partName;
+                                await library.UpdateItemAsync(part, part.GetParent(), ItemUpdateType.MetadataEdit, token).ConfigureAwait(false);
+                            }
+                        }
                         if (!primary.IsLocked && !primary.LockedFields.Contains(MetadataField.Name) && CatalogTitleRepair.IsSitePlaceholder(primary.Name, path) && !string.IsNullOrWhiteSpace(hydratedName) && primary.Name != hydratedName)
                         {
                             primary.Name = hydratedName;

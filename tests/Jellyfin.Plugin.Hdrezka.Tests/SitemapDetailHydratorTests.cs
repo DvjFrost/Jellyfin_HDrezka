@@ -6,6 +6,68 @@ using Xunit;
 public sealed class SitemapDetailHydratorTests
 {
     [Fact]
+    public async Task SeriesWithMoviePlayerCreatesPlayableSingleEpisode()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "hdrezka-series-movie-player-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var video = new SitemapVideo("123", "series", 2004, CatalogKind.Series, new Uri("https://mirror.test/series/a/123-series-2004.html"));
+            await SitemapLibraryWriter.WriteAsync(root, video, null, CancellationToken.None);
+            const string html = "<div class='b-post__title'><h1>Сериал</h1></div><script>initCDNMoviesEvents</script><a class='b-translator__items' data-id='123' data-translator_id='56' title='Free'></a>";
+            using var http = new HttpClient(new Handler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(html) }));
+            using var mirror = new MirrorClient(new Uri("https://mirror.test/"), http);
+            await SitemapDetailHydrator.HydrateAsync(root, video, null, new HdrezkaSource(mirror), CancellationToken.None);
+            var path = Path.Combine(root, "series", "HDrezka-123", "Season 01", "HDrezka-123 S01E01.strm");
+            Assert.True(File.Exists(path));
+            var record = LibraryRecordLocator.Load(root, path)!;
+            Assert.True(record.UseMoviePlayer);
+            Assert.Equal("Free", Assert.Single(record.Voices).Title);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task RecognizedFilmStillRepairsSlugTitleAndFillsMissingOverview()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "hdrezka-slug-repair-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var video = new SitemapVideo("123", "7 zapovedey kung fu", 1979, CatalogKind.Movie, new Uri("https://mirror.test/films/a/123-7-zapovedey-kung-fu-1979.html"));
+            var match = new TmdbMatch("123", TmdbMatchStatus.Matched, 1234, "7 zapovedey kung fu", "/poster.jpg", "movie");
+            await SitemapLibraryWriter.WriteAsync(root, video, match, CancellationToken.None);
+            const string html = "<div class='b-post__title'><h1>7 заповедей кунг-фу</h1></div><div class='b-post__description_text'>Описание фильма.</div>";
+            using var http = new HttpClient(new Handler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(html) }));
+            using var mirror = new MirrorClient(new Uri("https://mirror.test/"), http);
+            await SitemapDetailHydrator.HydrateAsync(root, video, match, new HdrezkaSource(mirror), CancellationToken.None);
+            var nfo = XDocument.Load(Path.Combine(root, "films", "HDrezka-123", "movie.nfo"));
+            Assert.Equal("7 заповедей кунг-фу", nfo.Root!.Element("title")!.Value);
+            Assert.Equal("Описание фильма.", nfo.Root.Element("plot")!.Value);
+            Assert.Equal("1234", nfo.Root.Element("tmdbid")!.Value);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task MatchedItemWithoutTmdbPosterUsesSitePoster()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "hdrezka-poster-fallback-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var video = new SitemapVideo("123", "film", 2012, CatalogKind.Movie, new Uri("https://mirror.test/films/a/123-film-2012.html"));
+            var match = new TmdbMatch("123", TmdbMatchStatus.Matched, 1234, "Название TMDB", null, "movie");
+            await SitemapLibraryWriter.WriteAsync(root, video, match, CancellationToken.None);
+            const string html = "<div class='b-post__title'><h1>Название сайта</h1></div><div class='b-sidecover'><img src='https://static.hdrezka.ac/i/poster.jpg'></div>";
+            using var http = new HttpClient(new Handler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(html) }));
+            using var mirror = new MirrorClient(new Uri("https://mirror.test/"), http);
+            await SitemapDetailHydrator.HydrateAsync(root, video, match, new HdrezkaSource(mirror), CancellationToken.None);
+            var nfo = XDocument.Load(Path.Combine(root, "films", "HDrezka-123", "movie.nfo"));
+            Assert.Equal("Название TMDB", nfo.Root!.Element("title")!.Value);
+            Assert.Equal("https://static.hdrezka.ac/i/poster.jpg", nfo.Root.Element("thumb")?.Value);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task UnmatchedItemPreservesUserTitleWhenSiteMetadataIsReloaded()
     {
         var root = Path.Combine(Path.GetTempPath(), "hdrezka-site-manual-" + Guid.NewGuid().ToString("N"));
@@ -120,6 +182,33 @@ public sealed class SitemapDetailHydratorTests
             Assert.False(File.Exists(Path.Combine(dir, "tvshow.nfo")));
             Assert.True(File.Exists(Path.Combine(result.StagedSeriesDirectory, "tvshow.nfo")));
             Assert.True(File.Exists(Path.Combine(result.StagedSeriesDirectory, "Season 01", "HDrezka-123 S01E01.strm")));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task MultipartFilmPreparesEveryPartWithoutDiscardingExistingMovie()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "hdrezka-multipart-film-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var video = new SitemapVideo("123", "film", 2014, CatalogKind.Movie, new Uri("https://mirror.test/films/a/123-film-2014.html"));
+            await SitemapLibraryWriter.WriteAsync(root, video, null, CancellationToken.None);
+            var dir = Path.Combine(root, "films", "HDrezka-123");
+            const string html = "<div class='b-post__title'><h1>Фильм из двух частей</h1></div><script>initCDNSeriesEvents</script><a class='b-translator__items' data-id='123' data-translator_id='56' title='Free'></a>";
+            const string episodes = "{\"success\":true,\"episodes\":\"<ul class='b-simple_episodes__list' id='simple-episodes-list-1'><li class='b-simple_episode__item' data-episode_id='1'>One</li><li class='b-simple_episode__item' data-episode_id='2'>Two</li></ul>\"}";
+            using var http = new HttpClient(new Handler(req => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(req.Method == HttpMethod.Get ? html : episodes) }));
+            using var mirror = new MirrorClient(new Uri("https://mirror.test/"), http);
+            var result = await SitemapDetailHydrator.HydrateAsync(root, video, null, new HdrezkaSource(mirror), CancellationToken.None);
+            Assert.Null(result.StagedSeriesDirectory);
+            Assert.Equal("Фильм из двух частей", XDocument.Load(Path.Combine(dir, "movie.nfo")).Root!.Element("title")!.Value);
+            var first = LibraryRecordLocator.Load(root, Path.Combine(dir, "HDrezka-123.strm"));
+            var second = LibraryRecordLocator.Load(root, Path.Combine(dir, ".hdrezka-parts", "HDrezka-123 - pt0002.strm"));
+            Assert.Equal("1", first!.Number);
+            Assert.Equal("2", second!.Number);
+            Assert.Equal("Free", Assert.Single(second.Voices).Title);
+            await SitemapLibraryWriter.WriteAsync(root, video, null, CancellationToken.None);
+            Assert.Equal("2", LibraryRecordLocator.Load(root, Path.Combine(dir, ".hdrezka-parts", "HDrezka-123 - pt0002.strm"))!.Number);
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }

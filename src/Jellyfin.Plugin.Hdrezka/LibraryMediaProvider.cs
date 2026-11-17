@@ -61,7 +61,7 @@ public sealed class LibraryMediaProvider(IApplicationPaths paths, ILibraryManage
         => $"{mirror.GetLeftPart(UriPartial.Authority)}:{record.Path}:{record.Season}:{record.Number}:{voice.Id}";
 
     private static Task<IReadOnlyList<NamedStream>> GetStreamsAsync(HdrezkaSource source, Uri mirror, LibraryVideoRecord record, FreeVoice voice, CancellationToken token)
-        => Streams.GetAsync(StreamKey(mirror, record, voice), ct => record.Season is null || record.Number is null
+        => Streams.GetAsync(StreamKey(mirror, record, voice), ct => record.Season is null || record.Number is null || record.UseMoviePlayer
             ? source.MovieVoiceStreamsFromListingAsync(record.Path, voice, ct)
             : source.EpisodeStreamsFromListingAsync(record.Path, voice, record.Season, record.Number, ct), token);
 

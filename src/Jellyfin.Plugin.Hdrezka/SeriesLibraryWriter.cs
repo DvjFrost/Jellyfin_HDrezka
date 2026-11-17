@@ -4,11 +4,11 @@ using System.Xml.Linq;
 namespace Jellyfin.Plugin.Hdrezka;
 
 public sealed record SeriesVoiceEpisodes(FreeVoice Voice, IReadOnlyList<Episode> Episodes);
-public sealed record LibraryEpisodeRecord(string Id, string Path, string Season, string Number, IReadOnlyList<FreeVoice> Voices);
+public sealed record LibraryEpisodeRecord(string Id, string Path, string Season, string Number, IReadOnlyList<FreeVoice> Voices, bool UseMoviePlayer = false);
 
 public static class SeriesLibraryWriter
 {
-    public static async Task WriteAsync(string root, CatalogEntry entry, CatalogDetail detail, IReadOnlyList<SeriesVoiceEpisodes> available, CancellationToken token)
+    public static async Task WriteAsync(string root, CatalogEntry entry, CatalogDetail detail, IReadOnlyList<SeriesVoiceEpisodes> available, CancellationToken token, bool useMoviePlayer = false)
     {
         var id = CatalogIdentity.FromPath(entry.Url.AbsolutePath) ?? throw new ArgumentException("Invalid video identity.", nameof(entry));
         if (!detail.HasEpisodes) throw new ArgumentException("A movie cannot be written as a series.", nameof(detail));
@@ -31,7 +31,7 @@ public static class SeriesLibraryWriter
             Directory.CreateDirectory(seasonDir);
             var baseName = $"{LibraryPath.TitleDirectory(id)} S{season:D2}E{number:D2}";
             var versions = group.Select(x => x.Voice).DistinctBy(v => v.Id).ToArray();
-            var record = new LibraryEpisodeRecord(id, entry.Url.AbsolutePath, group.Key.Season, group.Key.Number, versions);
+            var record = new LibraryEpisodeRecord(id, entry.Url.AbsolutePath, group.Key.Season, group.Key.Number, versions, useMoviePlayer);
             await MovieLibraryWriter.AtomicWriteAsync(Path.Combine(seasonDir, baseName + ".hdrezka.json"), JsonSerializer.Serialize(record), token).ConfigureAwait(false);
             var episodeNfoPath = Path.Combine(seasonDir, baseName + ".nfo");
             XDocument? episodeNfo = null;

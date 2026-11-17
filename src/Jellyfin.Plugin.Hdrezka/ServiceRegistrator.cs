@@ -19,6 +19,7 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         services.AddHostedService(sp => sp.GetRequiredService<DownloadService>());
         services.AddSingleton<SeriesMigration>();
         services.AddSingleton<SitemapDetailCoordinator>();
+        services.AddScoped<MultipartResumeFilter>();
         services.AddScoped<SitemapDetailFilter>();
         services.AddScoped<PluginPackageMetadataFilter>();
         services.AddScoped<DashboardConfigurationFilter>();
@@ -29,6 +30,7 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         services.Configure<MvcOptions>(options => options.Filters.AddService<DashboardConfigurationFilter>());
         services.Configure<MvcOptions>(options => options.Filters.AddService<PluginPackageMetadataFilter>());
         services.Configure<MvcOptions>(options => options.Filters.AddService<SitemapDetailFilter>());
+        services.Configure<MvcOptions>(options => options.Filters.AddService<MultipartResumeFilter>());
         var persistenceDescriptor = services.LastOrDefault(x => x.ServiceType == typeof(IItemPersistenceService));
         if (persistenceDescriptor is not null)
         {

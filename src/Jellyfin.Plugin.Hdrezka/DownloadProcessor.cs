@@ -12,7 +12,7 @@ public static class DownloadProcessor
         var listing = await source.VoiceListingAsync(job.ContentPath, token).ConfigureAwait(false);
         var voice = listing.Voices.FirstOrDefault(v => v.Id == job.VoiceId) ?? throw new InvalidOperationException("Бесплатная озвучка недоступна.");
         IReadOnlyList<NamedStream> streams;
-        if (job.Season is null && job.Episode is null)
+        if ((job.Season is null && job.Episode is null) || job.UseMoviePlayer)
             streams = await source.MovieVoiceAlternativesFromListingAsync(job.ContentPath, voice, token).ConfigureAwait(false);
         else if (job.Season is >= 0 && job.Episode is >= 1)
             streams = await source.EpisodeAlternativesFromListingAsync(job.ContentPath, voice, job.Season.Value.ToString(CultureInfo.InvariantCulture), job.Episode.Value.ToString(CultureInfo.InvariantCulture), token).ConfigureAwait(false);

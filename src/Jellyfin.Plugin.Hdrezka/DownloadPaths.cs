@@ -26,6 +26,12 @@ public static class DownloadPaths
     public static string Movie(string title, int? year)
         => Component(title) + (year is >= 1888 and <= 9999 ? $" ({year.Value.ToString(CultureInfo.InvariantCulture)})" : "") + ".mp4";
 
+    public static string MoviePart(string title, int? year, int part)
+    {
+        if (part is < 1 or > 9999) throw new ArgumentOutOfRangeException(nameof(part));
+        return Path.GetFileNameWithoutExtension(Movie(title, year)) + " - pt" + part.ToString(CultureInfo.InvariantCulture) + ".mp4";
+    }
+
     public static string Episode(string title, string voice, int season, int episode, string? episodeTitle)
     {
         if (season is < 0 or > 999) throw new ArgumentOutOfRangeException(nameof(season));

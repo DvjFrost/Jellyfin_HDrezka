@@ -49,7 +49,16 @@ public sealed class DownloadController(DownloadService downloads, ILibraryManage
         var item = library.GetItemById(id);
         var record = item is null ? null : media.Record(item);
         if (item is not Video || record is null) return NotFound();
-        return Ok(new DownloadItemOptions(item.Id, item.Name, record.Season is not null, record.Voices));
+        var voices = record.Voices;
+        if (record.MultipartMovie && item.Path is not null)
+        {
+            var directory = Path.GetDirectoryName(item.Path)!;
+            if (Path.GetFileName(directory) == ".hdrezka-parts") directory = Path.GetDirectoryName(directory)!;
+            var partsPath = Path.Combine(directory, "hdrezka-parts.json");
+            var parts = System.Text.Json.JsonSerializer.Deserialize<MultipartMoviePart[]>(System.IO.File.ReadAllText(partsPath)) ?? [];
+            voices = MultipartMovieWriter.CommonVoices(parts);
+        }
+        return Ok(new DownloadItemOptions(item.Id, item.Name, record.Season is not null && !record.MultipartMovie, voices));
     }
 
     [HttpPost("Items/{id:guid}/Prepare")]
@@ -60,7 +69,7 @@ public sealed class DownloadController(DownloadService downloads, ILibraryManage
         {
             if (string.IsNullOrEmpty(series.Path) || LibrarySeriesLocator.Load(media.Root, series.Path) is null) return NotFound();
         }
-        else if (item is not Video || media.Record(item) is not { Season: null }) return NotFound();
+        else if (item is not Video || media.Record(item) is not { } existing || (existing.Season is not null && !existing.MultipartMovie)) return NotFound();
         var replacement = await details.PrepareAsync(item, token).ConfigureAwait(false);
         var updated = replacement is { } replacementId ? library.GetItemById(replacementId) : library.GetItemById(id);
         return updated is null ? NotFound() : Ok(new { updated.Id, updated.Name });
@@ -72,13 +81,32 @@ public sealed class DownloadController(DownloadService downloads, ILibraryManage
         var item = library.GetItemById(request.ItemId);
         var record = item is null ? null : media.Record(item);
         if (item is not Video || record is null) return NotFound();
-        var series = record.Season is not null;
+        var series = record.Season is not null && !record.MultipartMovie;
         var root = DownloadLibraries.Resolve(library.GetVirtualFolders(), media.Root, request.DestinationId, series);
         if (root is null) return BadRequest("Выберите доступную медиатеку подходящего типа.");
         var title = item is MediaBrowser.Controller.Entities.TV.Episode ep ? ep.Series?.Name : item.Name;
         if (string.IsNullOrWhiteSpace(title)) return BadRequest("Не удалось определить название видео.");
         try
         {
+            if (record.MultipartMovie)
+            {
+                var dir = Path.GetDirectoryName(item.Path) ?? throw new InvalidOperationException("Не удалось определить папку фильма.");
+                if (Path.GetFileName(dir) == ".hdrezka-parts") dir = Path.GetDirectoryName(dir)!;
+                var parts = System.Text.Json.JsonSerializer.Deserialize<MultipartMoviePart[]>(await System.IO.File.ReadAllTextAsync(Path.Combine(dir, "hdrezka-parts.json"), token).ConfigureAwait(false)) ?? [];
+                if (parts.Length == 0) return Conflict("Не удалось найти части фильма.");
+                var jobs = new List<DownloadJob>();
+                for (var i = 0; i < parts.Length; i++)
+                {
+                    var part = parts[i];
+                    var partRecord = new LibraryVideoRecord(record.Id, record.Path, part.Season, part.Number, part.Voices, true);
+                    var partJob = DownloadJobFactory.CreateMoviePart(partRecord, title, item.ProductionYear, i + 1, request.VoiceId, request.Quality, request.DestinationId);
+                    if (parts.Length == 1) partJob = partJob with { RelativePath = DownloadPaths.Movie(title, item.ProductionYear) };
+                    if (System.IO.File.Exists(DownloadPaths.Resolve(root, partJob.RelativePath))) return Conflict("Одна из частей уже существует.");
+                    jobs.Add(partJob);
+                }
+                await downloads.AddRangeAsync(jobs, token).ConfigureAwait(false);
+                return Accepted(new { Added = jobs.Count });
+            }
             var job = DownloadJobFactory.Create(record, title, item.ProductionYear, series ? item.Name : null, request.VoiceId, request.Quality, request.DestinationId);
             if (System.IO.File.Exists(DownloadPaths.Resolve(root, job.RelativePath))) return Conflict("Файл уже существует.");
             await downloads.AddAsync(job, token).ConfigureAwait(false);

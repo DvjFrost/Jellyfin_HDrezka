@@ -4,6 +4,13 @@ namespace Jellyfin.Plugin.Hdrezka;
 
 public static class DownloadJobFactory
 {
+    public static DownloadJob CreateMoviePart(LibraryVideoRecord record, string title, int? year, int part, string voiceId, int quality, string destinationId)
+    {
+        if (record.Season is null || record.Number is null) throw new ArgumentException("Не указан номер части.", nameof(record));
+        var episode = Create(record, title, year, null, voiceId, quality, destinationId);
+        return episode with { RelativePath = DownloadPaths.MoviePart(title, year, part), EpisodeTitle = null, MoviePart = true };
+    }
+
     public static DownloadJob Create(LibraryVideoRecord record, string title, int? year, string? episodeTitle, string voiceId, int quality, string destinationId)
     {
         if (quality is not (0 or 240 or 360 or 480 or 720 or 1080)) throw new ArgumentOutOfRangeException(nameof(quality));
@@ -16,6 +23,6 @@ public static class DownloadJobFactory
             !int.TryParse(record.Number, NumberStyles.None, CultureInfo.InvariantCulture, out var number))
             throw new ArgumentException("Неверный номер серии.", nameof(record));
         return new DownloadJob(Guid.NewGuid(), record.Path, voice.Id, quality, destinationId,
-            DownloadPaths.Episode(title, voice.Title, season, number, episodeTitle), season, number, DownloadJobStatus.Queued, null, DisplayTitle: title, EpisodeTitle: episodeTitle, Year: year);
+            DownloadPaths.Episode(title, voice.Title, season, number, episodeTitle), season, number, DownloadJobStatus.Queued, null, DisplayTitle: title, EpisodeTitle: episodeTitle, Year: year, UseMoviePlayer: record.UseMoviePlayer);
     }
 }

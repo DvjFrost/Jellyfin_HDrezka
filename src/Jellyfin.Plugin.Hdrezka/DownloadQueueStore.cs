@@ -6,7 +6,7 @@ public enum DownloadJobStatus { Queued, Downloading, Completed, Failed, Cancelle
 
 public sealed record DownloadJob(Guid Id, string ContentPath, string VoiceId, int Quality, string LibraryId,
     string RelativePath, int? Season, int? Episode, DownloadJobStatus Status, string? Error, int? ActualQuality = null,
-    string? DisplayTitle = null, string? EpisodeTitle = null, int? Year = null, int? Width = null, int? Height = null);
+    string? DisplayTitle = null, string? EpisodeTitle = null, int? Year = null, int? Width = null, int? Height = null, bool MoviePart = false, bool UseMoviePlayer = false);
 
 public sealed class DownloadQueueStore(string directory)
 {

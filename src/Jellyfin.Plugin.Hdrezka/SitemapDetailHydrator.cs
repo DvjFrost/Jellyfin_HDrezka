@@ -27,7 +27,21 @@ public static class SitemapDetailHydrator
             title = listing.Detail.Title;
             poster = listing.Detail.Poster ?? poster;
         }
+        else poster ??= listing.Detail.Poster;
+        if (string.IsNullOrWhiteSpace(preservedTitle) && CatalogTitleRepair.IsSitePlaceholder(title, video.Url.AbsolutePath))
+            title = listing.Detail.Title;
         if (!string.IsNullOrWhiteSpace(preservedTitle)) title = preservedTitle;
+        if (video.Kind == CatalogKind.Movie && listing.Detail.HasEpisodes)
+        {
+            var available = new List<SeriesVoiceEpisodes>();
+            foreach (var voice in listing.Voices)
+                available.Add(new SeriesVoiceEpisodes(voice, await source.EpisodesFromListingAsync(video.Url.AbsolutePath, listing, voice, token).ConfigureAwait(false)));
+            var year = nfo.Root?.Element("year")?.Value ?? "";
+            var film = new CatalogEntry(title, video.Url, poster, video.Year?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? year, video.Kind);
+            await MultipartMovieWriter.WriteAsync(library, film, listing.Detail with { Title = title }, available, token).ConfigureAwait(false);
+            await SitemapMetadataStore.WriteAsync(dir, new SitemapMetadata(video.Id, fromTmdb, !fromTmdb), token).ConfigureAwait(false);
+            return new SitemapHydrationResult(null);
+        }
         var transition = !isSeries && listing.Detail.HasEpisodes && video.Kind is CatalogKind.Cartoon or CatalogKind.Anime or CatalogKind.Show;
         if (!isSeries && listing.Detail.HasEpisodes && !transition) throw new InvalidOperationException("A film was identified as a series.");
         if (transition) isSeries = true;
@@ -38,9 +52,11 @@ public static class SitemapDetailHydrator
         {
             var episodes = new List<SeriesVoiceEpisodes>();
             foreach (var voice in listing.Voices)
-                episodes.Add(new SeriesVoiceEpisodes(voice, await source.EpisodesFromListingAsync(video.Url.AbsolutePath, listing, voice, token).ConfigureAwait(false)));
+                episodes.Add(new SeriesVoiceEpisodes(voice, listing.Detail.HasEpisodes
+                    ? await source.EpisodesFromListingAsync(video.Url.AbsolutePath, listing, voice, token).ConfigureAwait(false)
+                    : [new Episode("1", "1", "Полная версия")]));
             var destination = transition ? Path.Combine(root, ".hdrezka-staging", video.Id) : library;
-            await SeriesLibraryWriter.WriteAsync(destination, entry, detail, episodes, token).ConfigureAwait(false);
+            await SeriesLibraryWriter.WriteAsync(destination, entry, detail, episodes, token, !listing.Detail.HasEpisodes).ConfigureAwait(false);
             if (transition)
             {
                 var staged = Path.Combine(destination, LibraryPath.TitleDirectory(video.Id));

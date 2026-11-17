@@ -8,16 +8,41 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Filters;
 using MediaBrowser.Model.Session;
+using MediaBrowser.Controller.Session;
 
 namespace Jellyfin.Plugin.Hdrezka;
 
-public sealed class SitemapDetailFilter(SitemapDetailCoordinator coordinator, ILibraryManager library, IUserManager users, LibraryMediaProvider media) : IAsyncActionFilter
+public sealed class SitemapDetailFilter(SitemapDetailCoordinator coordinator, ILibraryManager library, IUserManager users, LibraryMediaProvider media, ISessionManager? sessions = null) : IAsyncActionFilter
 {
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, SemaphoreSlim> EpisodeRepairGates = new();
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
         BaseItem? detailsItem = null;
         var action = context.ActionDescriptor as ControllerActionDescriptor;
+        if (sessions is not null && context.HttpContext.User.Identity?.IsAuthenticated == true && action?.ControllerName == "Playstate" && action.ActionName == "ReportPlaybackStopped"
+            && context.ActionArguments.TryGetValue("playbackStopInfo", out var multipartStop) && multipartStop is PlaybackStopInfo stopped
+            && Guid.TryParse(context.HttpContext.User.FindFirst("Jellyfin-UserId")?.Value, out var multipartUser)
+            && context.HttpContext.User.FindFirst("Jellyfin-DeviceId")?.Value is { Length: > 0 } multipartDevice
+            && sessions.Sessions.FirstOrDefault(s => s.UserId == multipartUser && s.DeviceId == multipartDevice && s.NowPlayingItem?.Id == stopped.ItemId) is { } session
+            && library.GetItemById(stopped.ItemId) is Video multipartItem && media.Record(multipartItem) is { MultipartMovie: true } multipartRecord
+            && MultipartContinuation.Finished(stopped.PositionTicks, multipartItem.RunTimeTicks, stopped.Failed)
+            && !string.IsNullOrEmpty(multipartItem.Path))
+        {
+            var dir = Path.GetDirectoryName(multipartItem.Path)!;
+            var isPart = Path.GetFileName(dir) == ".hdrezka-parts";
+            if (isPart) dir = Path.GetDirectoryName(dir)!;
+            var match = System.Text.RegularExpressions.Regex.Match(Path.GetFileNameWithoutExtension(multipartItem.Path), @" - pt([0-9]{1,4})$");
+            var index = match.Success && int.TryParse(match.Groups[1].Value, out var parsed) ? parsed : 1;
+            var nextPath = Path.Combine(dir, ".hdrezka-parts", LibraryPath.TitleDirectory(multipartRecord.Id) + " - pt" + (index + 1).ToString("D4", System.Globalization.CultureInfo.InvariantCulture) + ".strm");
+            var nextId = library.GetNewItemId(nextPath, typeof(Video));
+            if (System.IO.File.Exists(nextPath) && library.GetItemById<Video>(nextId) is not null && !(stopped.NowPlayingQueue?.Any(q => q.Id == nextId) ?? false))
+            {
+                NextEpisodeVoice.Shared.Stopped(context.HttpContext.User.FindFirst("Jellyfin-UserId")!.Value, multipartDevice, multipartRecord, stopped.PositionTicks);
+                await next().ConfigureAwait(false);
+                await sessions.SendPlayCommand(session.Id, session.Id, new PlayRequest { ItemIds = [nextId], PlayCommand = PlayCommand.PlayNow, ControllingUserId = multipartUser }, context.HttpContext.RequestAborted).ConfigureAwait(false);
+                return;
+            }
+        }
         if (context.HttpContext.User.Identity?.IsAuthenticated == true && action?.ControllerName == "Playstate" && action.ActionName == "ReportPlaybackStopped"
             && context.ActionArguments.TryGetValue("playbackStopInfo", out var stopArgument) && stopArgument is PlaybackStopInfo stop && !stop.Failed
             && context.HttpContext.User.FindFirst("Jellyfin-UserId")?.Value is { Length: > 0 } stopUser
@@ -121,7 +146,7 @@ public sealed class SitemapDetailFilter(SitemapDetailCoordinator coordinator, IL
         var executed = await next().ConfigureAwait(false);
         if (requestedQuality is { } qualityId && executed.Result is ObjectResult { Value: BaseItemDto resolvedDto })
             resolvedDto.Id = qualityId;
-        if (detailsItem is Video video && media.Record(video) is { Season: null, Voices.Count: 1 } record &&
+        if (detailsItem is Video video && media.Record(video) is { Voices.Count: 1 } record && (record.Season is null || record.MultipartMovie) &&
             executed.Result is ObjectResult { Value: BaseItemDto dto })
         {
             string? sourceName = null;

@@ -66,7 +66,7 @@ public sealed class DownloadService(IApplicationPaths paths, ILibraryManager lib
         {
         if ((await (await _queue.ConfigureAwait(false)).ListAsync(token).ConfigureAwait(false)).FirstOrDefault(item => item.Id == job.Id)?.Status == DownloadJobStatus.Cancelled) return;
         token = cancellation.Token;
-        var root = DownloadLibraries.Resolve(library.GetVirtualFolders(), media.Root, job.LibraryId, job.Season is not null)
+        var root = DownloadLibraries.Resolve(library.GetVirtualFolders(), media.Root, job.LibraryId, job.Season is not null && !job.MoviePart)
             ?? throw new InvalidOperationException("Папка медиатеки больше недоступна.");
         var config = Plugin.Instance?.Configuration ?? throw new InvalidOperationException("Настройки плагина недоступны.");
         if (_mirror is null || !string.Equals(_mirrorUrl, config.MirrorUrl, StringComparison.OrdinalIgnoreCase))

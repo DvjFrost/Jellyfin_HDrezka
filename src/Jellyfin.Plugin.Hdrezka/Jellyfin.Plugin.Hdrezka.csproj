@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Jellyfin.Plugin.Hdrezka</AssemblyName>
     <RootNamespace>Jellyfin.Plugin.Hdrezka</RootNamespace>
-    <Version>0.3.3</Version>
+    <Version>0.3.4</Version>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
   <ItemGroup>

@@ -50,7 +50,9 @@ public static class MovieLibraryWriter
             if (string.IsNullOrWhiteSpace(value)) return;
             var existing = root.Element(name);
             if (existing is null) root.Add(new XElement(name, value));
-            else if (!recognized || string.IsNullOrWhiteSpace(existing.Value)) existing.Value = value;
+            else if (!recognized || string.IsNullOrWhiteSpace(existing.Value) ||
+                (name == "title" && CatalogTitleRepair.IsSitePlaceholder(existing.Value, entry.Url.AbsolutePath) &&
+                 !string.Equals(root.Element("lockdata")?.Value, "true", StringComparison.OrdinalIgnoreCase))) existing.Value = value;
         }
         Set("title", detail.Title); Set("plot", detail.Overview);
         Set("year", YearElement(entry.Description)?.Value); Set("thumb", entry.Poster?.AbsoluteUri);

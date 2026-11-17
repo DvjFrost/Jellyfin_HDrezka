@@ -9,7 +9,7 @@ public static class DownloadMetadata
         var nfoPath = Path.ChangeExtension(destination, ".nfo");
         if (File.Exists(nfoPath)) return;
         XDocument document;
-        if (job.Season is { } season && job.Episode is { } number)
+        if (!job.MoviePart && job.Season is { } season && job.Episode is { } number)
         {
             var title = string.IsNullOrWhiteSpace(job.EpisodeTitle) ? $"Серия {number}" : job.EpisodeTitle;
             document = new XDocument(new XElement("episodedetails", new XElement("title", title), new XElement("season", season), new XElement("episode", number)));
