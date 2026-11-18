@@ -11,6 +11,9 @@
                 <input is="emby-input" id="mirrorUrl" name="mirrorUrl" type="url" list="hdrezkaMirrors" required autocapitalize="off" spellcheck="false" aria-describedby="mirrorHelp">
                 <datalist id="hdrezkaMirrors"><option value="https://rezka-tv.org/"></option><option value="https://hello-rezka.tv/"></option><option value="https://omnirezka.tv/"></option><option value="https://kinopub.me/"></option><option value="https://rezka.pub/"></option><option value="https://hdrezka.website/"></option><option value="https://hdrezka-home.tv/"></option><option value="https://hdrezka.name/"></option><option value="https://hdrezka.sh/"></option><option value="https://hdrezka.in/"></option><option value="https://hdrezka.club/"></option><option value="https://rezka-kz.tv/"></option><option value="https://rezka-ua.net/"></option><option value="https://rezka-ua.org/"></option><option value="https://rezka-ua.in/"></option><option value="https://rezka-ua.co/"></option><option value="https://hdrezka.kim/"></option><option value="https://rezka-ua.pub/"></option><option value="https://rezkery.com/"></option><option value="https://rezka-ua.tv/"></option><option value="https://hdrezka-fly.net/"></option><option value="https://hdrezka-sonic.net/"></option><option value="https://hdrezka.hk/"></option></datalist>
                 <div id="mirrorHelp" class="fieldDescription">Выберите зеркало из списка или введите собственный адрес HTTPS.</div>
+                <div class="fieldDescription">Сессия выбранного сохранённого зеркала обновляется при запуске сервера и каждые 6 часов.</div>
+                <button is="emby-button" type="button" class="raised button-submit block" id="resetSession"><span>Сменить сессию</span></button>
+                <div id="sessionStatus" role="status" aria-live="polite"></div>
             </div>
             <div class="selectContainer selectContainer-withDescription">
                 <label for="cdnHost">Сервер видео (CDN)</label>
@@ -73,6 +76,17 @@
         const show = page.querySelector('#showToken');
         const preferredQuality = page.querySelector('#preferredQuality');
         const catalogStatistics = page.querySelector('#catalogStatistics');
+        const resetSession = page.querySelector('#resetSession');
+        const sessionStatus = page.querySelector('#sessionStatus');
+        resetSession.addEventListener('click', async function () {
+            resetSession.disabled = true;
+            sessionStatus.textContent = 'Обновляем сессию…';
+            try {
+                await ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Hdrezka/Session/Reset') });
+                sessionStatus.textContent = 'Сессия обновлена. Новая проверка сайта выполнится при следующем запросе.';
+            } catch (_) { sessionStatus.textContent = 'Не удалось обновить сессию. Проверьте адрес зеркала и повторите попытку.'; }
+            finally { resetSession.disabled = false; }
+        });
         async function loadCatalogStatistics() {
             try {
                 const s = await ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Hdrezka/Catalog/Statistics'), dataType: 'json' });

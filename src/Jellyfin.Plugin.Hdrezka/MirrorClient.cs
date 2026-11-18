@@ -50,6 +50,21 @@ public sealed class MirrorClient : IDisposable
 
     public Uri CurrentMirror => _effective;
 
+    public static async Task ResetSessionAsync(Uri mirror, CancellationToken token)
+    {
+        var key = mirror.GetLeftPart(UriPartial.Authority);
+        var challenge = Challenges.GetOrAdd(key, static _ => new ChallengeState());
+        var requests = MirrorRequests.GetOrAdd(key, static _ => new MirrorRequestState());
+        await challenge.Gate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            await requests.Gate.WaitAsync(token).ConfigureAwait(false);
+            try { await MirrorSessionRegistry.ResetAsync(mirror, token).ConfigureAwait(false); }
+            finally { requests.Gate.Release(); }
+        }
+        finally { challenge.Gate.Release(); }
+    }
+
     public Task<string> GetPageAsync(Uri uri, CancellationToken cancellationToken) => GetAsync(uri, 2_000_000, cancellationToken);
 
     public Task<string> GetSitemapAsync(Uri uri, CancellationToken cancellationToken) => GetAsync(uri, 20_000_000, cancellationToken);

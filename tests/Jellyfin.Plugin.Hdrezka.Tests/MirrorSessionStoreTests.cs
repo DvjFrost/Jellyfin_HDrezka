@@ -5,6 +5,16 @@ using Xunit;
 public sealed class MirrorSessionStoreTests
 {
     [Fact]
+    public async Task SessionResetClearsCookiesWithoutReplacingHttpClient()
+    {
+        var uri = new Uri("https://session-reset-test.invalid/");
+        var client = MirrorSessionRegistry.Client(uri);
+        MirrorSessionRegistry.CookiesForTesting(uri).Add(uri, new Cookie("session", "old", "/"));
+        await MirrorSessionRegistry.ResetAsync(uri, CancellationToken.None);
+        Assert.Same(client, MirrorSessionRegistry.Client(uri));
+        Assert.Empty(MirrorSessionRegistry.CookiesForTesting(uri).GetCookies(uri).Cast<Cookie>());
+    }
+    [Fact]
     public async Task PersistsAndRestoresCookiesPerMirror()
     {
         var directory = Path.Combine(Path.GetTempPath(), "hdrezka-session-" + Guid.NewGuid().ToString("N"));

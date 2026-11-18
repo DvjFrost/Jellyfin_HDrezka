@@ -5,6 +5,14 @@
     "description": "Каталог фильмов и сериалов HDrezka с данными TMDB и бесплатными озвучками.",
     "versions": [
       {
+        "timestamp": "2026-11-18T00:00:00Z",
+        "targetAbi": "12.4.0.0",
+        "changelog": "Ручная и автоматическая смена сессии зеркала при запуске и каждые шесть часов.",
+        "checksum": "1ce3ec190b3cb6f87ef767d4456c099d",
+        "sourceUrl": "https://raw.githubusercontent.com/DvjFrost/Jellyfin_HDrezka/main/packages/HDrezka-v0.3.7.zip",
+        "version": "0.3.7.0"
+      },
+      {
         "timestamp": "2026-11-17T00:00:00Z",
         "targetAbi": "12.4.0.0",
         "changelog": "Заполнение оригинального названия, даты выхода, IMDb ID и возрастной категории со страницы HDrezka.",
